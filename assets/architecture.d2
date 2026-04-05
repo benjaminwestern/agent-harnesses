@@ -1,0 +1,51 @@
+shape: sequence_diagram
+
+classes: {
+  runtime: {
+    style.fill: "#F4F1EA"
+    style.stroke: "#C46B38"
+    style.stroke-width: 2
+  }
+  helper: {
+    style.fill: "#101721"
+    style.stroke: "#2E7074"
+    style.stroke-width: 2
+    style.font-color: "#FFF9F0"
+  }
+  transport: {
+    style.fill: "#FCFAF6"
+    style.stroke: "#4C6F94"
+    style.stroke-width: 2
+  }
+  host: {
+    style.fill: "#FCFAF6"
+    style.stroke: "#5C725A"
+    style.stroke-width: 2
+  }
+  debug: {
+    style.fill: "#FCFAF6"
+    style.stroke: "#9A4E45"
+    style.stroke-width: 2
+  }
+}
+
+Runtime: {class: runtime; label: "Runtime hook or plugin"}
+Helper: {class: helper; label: "agent_harness helper"}
+Receiver: {class: transport; label: "Local receiver"}
+Host: {class: host; label: "Host application"}
+Debug: {class: debug; label: "Debug listener"}
+
+group product flow: {
+  Runtime -> Helper: "Invoke command\nJSON on stdin + runtime env"
+  Helper -> Helper: "Parse native payload\nnormalise event\nappend bindings"
+  Helper -> Receiver: "Emit HarnessEvent\nUnix socket in product mode"
+  Receiver -> Host: "Deliver live event stream"
+  Host -> Host: "Correlate launch, session,\nand app-owned bindings"
+}
+
+group explicit debug branch: {
+  Helper -> Debug: "Optional stdout mirror\nonly when debug is enabled"
+}
+
+Helper.note: Translation stays generic.\nNo product-specific roles live here.
+Host.note: The host application remains the source of truth\nfor its own runtime and session state.

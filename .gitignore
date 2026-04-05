@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.pyc
+.codex/
+.gemini/
+.claude/
+.opencode/
+.agent-harnesses/
+.agentic-control/
+.artifacts/
+node_modules/

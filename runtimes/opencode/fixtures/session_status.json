@@ -1,0 +1,15 @@
+{
+  "hook_event_name": "session.status",
+  "cwd": "/workspace/agentic-control",
+  "worktree": "/workspace/agentic-control",
+  "session_id": "opencode-session-001",
+  "event": {
+    "type": "session.status",
+    "properties": {
+      "sessionID": "opencode-session-001",
+      "status": {
+        "type": "busy"
+      }
+    }
+  }
+}

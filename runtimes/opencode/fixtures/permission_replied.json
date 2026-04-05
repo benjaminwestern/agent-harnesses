@@ -1,0 +1,15 @@
+{
+  "hook_event_name": "permission.replied",
+  "cwd": "/workspace/agentic-control",
+  "worktree": "/workspace/agentic-control",
+  "session_id": "opencode-session-001",
+  "reason": "once",
+  "event": {
+    "type": "permission.replied",
+    "properties": {
+      "sessionID": "opencode-session-001",
+      "requestID": "permission-request-001",
+      "reply": "once"
+    }
+  }
+}

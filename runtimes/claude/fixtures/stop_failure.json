@@ -1,0 +1,9 @@
+{
+  "session_id": "claude-session-123",
+  "transcript_path": "/workspace/.claude/projects/agentic-control/transcript.jsonl",
+  "cwd": "/workspace/agentic-control",
+  "hook_event_name": "StopFailure",
+  "error": "rate_limit",
+  "error_details": "429 Too Many Requests",
+  "last_assistant_message": "API Error: Rate limit reached"
+}

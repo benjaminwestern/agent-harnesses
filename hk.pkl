@@ -1,0 +1,157 @@
+amends "package://github.com/jdx/hk/releases/download/v1.38.0/hk@1.38.0#/Config.pkl"
+
+local workspaceIndicator = "hk.pkl"
+
+local formatters = new Mapping<String, Step> {
+    ["hk_config"] {
+        glob = List(
+            "hk.pkl",
+            "**/hk.pkl",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && hk validate"
+        batch = false
+    }
+
+    ["scripts_check"] {
+        glob = List(
+            "scripts/**/*.py",
+            "**/scripts/**/*.py",
+            "scripts/**/*.sh",
+            "**/scripts/**/*.sh",
+            "runtimes/**/*.js",
+            "**/runtimes/**/*.js",
+            "runtimes/**/*.sh",
+            "**/runtimes/**/*.sh",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && mise run scripts:check"
+        batch = false
+    }
+
+    ["docs_validate"] {
+        glob = List(
+            "README.md",
+            "**/README.md",
+            "docs/**/*.md",
+            "**/docs/**/*.md",
+            "assets/**/*.d2",
+            "**/assets/**/*.d2",
+            "scripts/generate_assets.py",
+            "**/scripts/generate_assets.py",
+            "scripts/validate_readme.py",
+            "**/scripts/validate_readme.py",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && mise run validate-docs"
+        batch = false
+    }
+}
+
+local verifiers = new Mapping<String, Step> {
+    ["mise_config"] {
+        glob = List(
+            "mise.toml",
+            "**/mise.toml",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && mise run mise:validate"
+        batch = false
+    }
+
+    ["hk_config"] {
+        glob = List(
+            "hk.pkl",
+            "**/hk.pkl",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && hk validate"
+        batch = false
+    }
+
+    ["scripts_check"] {
+        glob = List(
+            "scripts/**/*.py",
+            "**/scripts/**/*.py",
+            "scripts/**/*.sh",
+            "**/scripts/**/*.sh",
+            "runtimes/**/*.js",
+            "**/runtimes/**/*.js",
+            "runtimes/**/*.sh",
+            "**/runtimes/**/*.sh",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && mise run scripts:check"
+        batch = false
+    }
+
+    ["fixture_replay"] {
+        glob = List(
+            "cmd/**/*.go",
+            "**/cmd/**/*.go",
+            "internal/**/*.go",
+            "**/internal/**/*.go",
+            "pkg/**/*.go",
+            "**/pkg/**/*.go",
+            "runtimes/**/*.json",
+            "**/runtimes/**/*.json",
+            "runtimes/**/*.sh",
+            "**/runtimes/**/*.sh",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && mise run diag:fixtures:all"
+        batch = false
+    }
+
+    ["docs_validate"] {
+        glob = List(
+            "README.md",
+            "**/README.md",
+            "docs/**/*.md",
+            "**/docs/**/*.md",
+            "assets/**/*.d2",
+            "**/assets/**/*.d2",
+            "assets/**/*.svg",
+            "**/assets/**/*.svg",
+            "scripts/generate_assets.py",
+            "**/scripts/generate_assets.py",
+            "scripts/validate_readme.py",
+            "**/scripts/validate_readme.py",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && mise run validate-docs"
+        batch = false
+    }
+
+    ["generated_assets"] {
+        glob = List(
+            "README.md",
+            "**/README.md",
+            "assets/**/*.d2",
+            "**/assets/**/*.d2",
+            "scripts/generate_assets.py",
+            "**/scripts/generate_assets.py",
+        )
+        workspace_indicator = workspaceIndicator
+        check = "cd {{workspace}} && mise run assets:check"
+        batch = false
+    }
+}
+
+hooks {
+    ["pre-commit"] {
+        fix = true
+        stash = "git"
+        steps = formatters
+    }
+    ["pre-push"] {
+        steps = verifiers
+    }
+    ["fix"] {
+        fix = true
+        steps = formatters
+    }
+    ["check"] {
+        steps = verifiers
+    }
+}

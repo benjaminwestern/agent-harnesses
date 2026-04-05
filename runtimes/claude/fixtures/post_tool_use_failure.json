@@ -1,0 +1,15 @@
+{
+  "session_id": "claude-session-123",
+  "transcript_path": "/workspace/.claude/projects/agentic-control/transcript.jsonl",
+  "cwd": "/workspace/agentic-control",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm test",
+    "description": "Run the test suite"
+  },
+  "tool_use_id": "toolu_claude_failure_001",
+  "error": "Command exited with non-zero status code 1",
+  "is_interrupt": false
+}

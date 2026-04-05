@@ -1,0 +1,9 @@
+{
+  "session_id": "claude-session-123",
+  "transcript_path": "/workspace/.claude/projects/agentic-control/transcript.jsonl",
+  "cwd": "/workspace/agentic-control",
+  "permission_mode": "default",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "I inspected the repository and found the Claude harness bundle, fixtures, prompts, and installation wiring."
+}

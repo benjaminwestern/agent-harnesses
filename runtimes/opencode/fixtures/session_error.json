@@ -1,0 +1,17 @@
+{
+  "hook_event_name": "session.error",
+  "cwd": "/workspace/agentic-control",
+  "worktree": "/workspace/agentic-control",
+  "session_id": "opencode-session-001",
+  "reason": "provider_auth_error",
+  "event": {
+    "type": "session.error",
+    "properties": {
+      "sessionID": "opencode-session-001",
+      "error": {
+        "type": "provider_auth_error",
+        "message": "Provider credentials are missing"
+      }
+    }
+  }
+}

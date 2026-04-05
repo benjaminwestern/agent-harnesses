@@ -1,0 +1,9 @@
+{
+  "session_id": "claude-session-123",
+  "transcript_path": "/workspace/.claude/projects/agentic-control/transcript.jsonl",
+  "cwd": "/workspace/agentic-control",
+  "hook_event_name": "Notification",
+  "message": "Claude needs your permission to use Bash",
+  "title": "Permission needed",
+  "notification_type": "permission_prompt"
+}

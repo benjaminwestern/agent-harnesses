@@ -1,0 +1,19 @@
+{
+  "hook_event_name": "tool.execute.before",
+  "cwd": "/workspace/agentic-control",
+  "worktree": "/workspace/agentic-control",
+  "session_id": "opencode-session-001",
+  "tool_call_id": "tool-call-001",
+  "tool_name": "bash",
+  "command": "pwd && ls -1 runtimes/opencode",
+  "input": {
+    "tool": "bash",
+    "sessionID": "opencode-session-001",
+    "callID": "tool-call-001"
+  },
+  "output": {
+    "args": {
+      "command": "pwd && ls -1 runtimes/opencode"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "hook_event_name": "permission.asked",
+  "cwd": "/workspace/agentic-control",
+  "worktree": "/workspace/agentic-control",
+  "session_id": "opencode-session-001",
+  "tool_call_id": "tool-call-approval-001",
+  "tool_name": "bash",
+  "command": "python3 -c \"from pathlib import Path; p = Path('.artifacts/opencode-hook-approval.txt'); p.parent.mkdir(parents=True, exist_ok=True); p.write_text('opencode approval probe\\n', encoding='utf-8'); print(p)\"",
+  "event": {
+    "type": "permission.asked",
+    "properties": {
+      "id": "permission-request-001",
+      "sessionID": "opencode-session-001",
+      "permission": "bash",
+      "patterns": [
+        "python3 *"
+      ],
+      "metadata": {
+        "command": "python3 -c \"from pathlib import Path; p = Path('.artifacts/opencode-hook-approval.txt'); p.parent.mkdir(parents=True, exist_ok=True); p.write_text('opencode approval probe\\n', encoding='utf-8'); print(p)\""
+      },
+      "always": [
+        "python3 *"
+      ],
+      "tool": {
+        "messageID": "message-approval-001",
+        "callID": "tool-call-approval-001"
+      }
+    }
+  }
+}

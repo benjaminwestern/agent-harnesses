@@ -1,0 +1,248 @@
+[tools]
+"go:oss.terrastruct.com/d2" = { version = "0.7.1" }
+go = "1.26.1"
+hk = "latest"
+node = "22"
+python = "3.13"
+
+[tasks."tasks:local"]
+description = "List project-specific mise tasks without global task noise"
+run = "mise tasks ls --local"
+
+[tasks.build]
+description = "Build the shared harness and control-plane binaries"
+run = """
+if [[ ! -d internal/controlplane/providers/claude/sdkbridge/node_modules/@anthropic-ai/claude-agent-sdk ]]; then
+  npm ci --prefix internal/controlplane/providers/claude/sdkbridge
+fi
+mkdir -p .artifacts/bin
+go build -o .artifacts/bin/agent_harness ./cmd/agent-harness
+go build -o .artifacts/bin/agent_control ./cmd/agent-control
+"""
+
+[tasks."go:fmt"]
+description = "Format Go sources"
+run = "gofmt -w cmd internal pkg"
+
+[tasks."go:fmt:check"]
+description = "Check Go formatting"
+run = """
+test -z "$(gofmt -l cmd internal pkg)"
+"""
+
+[tasks."scripts:check"]
+description = "Check shell and Python scripts"
+run = """
+find scripts runtimes -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+find scripts -type f -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
+find runtimes -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+find internal/controlplane/providers/claude/sdkbridge -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check
+"""
+
+[tasks."generate-assets"]
+description = "Regenerate the README banner, section headers, and D2 architecture asset"
+run = """
+python3 scripts/generate_assets.py
+d2 assets/architecture.d2 assets/architecture.svg
+"""
+
+[tasks."validate-docs"]
+description = "Validate README links and generated documentation assets"
+run = "python3 scripts/validate_readme.py"
+
+[tasks."mise:validate"]
+description = "Validate mise configuration"
+run = "mise tasks ls --local >/dev/null"
+
+[tasks."diag:listen"]
+description = "Start a local debug listener on the default socket"
+depends = ["build"]
+run = """
+SOCKET_PATH="${SOCKET_PATH:-/tmp/agent-harness.sock}"
+.artifacts/bin/agent_harness listen --socket-path "$SOCKET_PATH"
+"""
+
+[tasks."control:serve"]
+description = "Start the Go control-plane server on a local Unix socket"
+depends = ["build"]
+run = """
+SOCKET_PATH="${SOCKET_PATH:-/tmp/agentic-control.sock}"
+.artifacts/bin/agent_control serve --socket-path "$SOCKET_PATH"
+"""
+
+[tasks."diag:fixtures:codex"]
+description = "Replay all Codex fixtures through the shared helper"
+depends = ["build"]
+run = """
+for FIXTURE in runtimes/codex/fixtures/*.json; do
+  echo "==> $FIXTURE"
+  .artifacts/bin/agent_harness --runtime codex --stdout < "$FIXTURE"
+done
+"""
+
+[tasks."diag:fixtures:gemini"]
+description = "Replay all Gemini fixtures through the shared helper"
+depends = ["build"]
+run = """
+for FIXTURE in runtimes/gemini/fixtures/*.json; do
+  echo "==> $FIXTURE"
+  .artifacts/bin/agent_harness --runtime gemini --stdout < "$FIXTURE"
+done
+"""
+
+[tasks."diag:fixtures:claude"]
+description = "Replay all Claude fixtures through the shared helper"
+depends = ["build"]
+run = """
+for FIXTURE in runtimes/claude/fixtures/*.json; do
+  echo "==> $FIXTURE"
+  .artifacts/bin/agent_harness --runtime claude --stdout < "$FIXTURE"
+done
+"""
+
+[tasks."diag:fixtures:opencode"]
+description = "Replay all OpenCode fixtures through the shared helper"
+depends = ["build"]
+run = """
+for FIXTURE in runtimes/opencode/fixtures/*.json; do
+  echo "==> $FIXTURE"
+  .artifacts/bin/agent_harness --runtime opencode --provenance native_plugin --stdout < "$FIXTURE"
+done
+"""
+
+[tasks."diag:fixtures:all"]
+description = "Replay every runtime fixture through the shared helper"
+depends = ["diag:fixtures:codex", "diag:fixtures:gemini", "diag:fixtures:claude", "diag:fixtures:opencode"]
+run = "true"
+
+[tasks."diag:install:codex"]
+description = "Install the repo-local Codex bundle for live testing"
+depends = ["build"]
+run = ".artifacts/bin/agent_harness install --runtime codex --scope repo --socket-env AGENT_HARNESS_SOCKET"
+
+[tasks."diag:install:gemini"]
+description = "Install the repo-local Gemini bundle for live testing"
+depends = ["build"]
+run = ".artifacts/bin/agent_harness install --runtime gemini --scope repo --socket-env AGENT_HARNESS_SOCKET"
+
+[tasks."diag:install:claude"]
+description = "Install the repo-local Claude bundle for live testing"
+depends = ["build"]
+run = ".artifacts/bin/agent_harness install --runtime claude --scope repo --socket-env AGENT_HARNESS_SOCKET"
+
+[tasks."diag:install:opencode"]
+description = "Install the global OpenCode bundle for live testing"
+depends = ["build"]
+run = ".artifacts/bin/agent_harness install --runtime opencode --scope global --socket-env AGENT_HARNESS_SOCKET"
+
+[tasks."diag:codex:smoke"]
+description = "Run a live Codex smoke scenario with the hook harness enabled"
+depends = ["diag:install:codex"]
+run = ".artifacts/bin/agent_harness run --runtime codex --scenario smoke"
+
+[tasks."diag:codex:bash"]
+description = "Run a live Codex Bash scenario with the hook harness enabled"
+depends = ["diag:install:codex"]
+run = ".artifacts/bin/agent_harness run --runtime codex --scenario bash"
+
+[tasks."diag:codex:approval"]
+description = "Run a live Codex approval scenario with the hook harness enabled"
+depends = ["diag:install:codex"]
+run = ".artifacts/bin/agent_harness run --runtime codex --scenario approval"
+
+[tasks."diag:gemini:smoke"]
+description = "Run a live Gemini smoke scenario with the hook harness enabled"
+depends = ["diag:install:gemini"]
+run = ".artifacts/bin/agent_harness run --runtime gemini --scenario smoke"
+
+[tasks."diag:gemini:bash"]
+description = "Run a live Gemini Bash scenario with the hook harness enabled"
+depends = ["diag:install:gemini"]
+run = ".artifacts/bin/agent_harness run --runtime gemini --scenario bash"
+
+[tasks."diag:gemini:approval"]
+description = "Run a live Gemini approval scenario with the hook harness enabled"
+depends = ["diag:install:gemini"]
+run = ".artifacts/bin/agent_harness run --runtime gemini --scenario approval"
+
+[tasks."diag:claude:smoke"]
+description = "Run a live Claude smoke scenario with the hook harness enabled"
+depends = ["diag:install:claude"]
+run = ".artifacts/bin/agent_harness run --runtime claude --scenario smoke"
+
+[tasks."diag:claude:bash"]
+description = "Run a live Claude Bash scenario with the hook harness enabled"
+depends = ["diag:install:claude"]
+run = ".artifacts/bin/agent_harness run --runtime claude --scenario bash"
+
+[tasks."diag:claude:approval"]
+description = "Run a live Claude approval scenario with the hook harness enabled"
+depends = ["diag:install:claude"]
+run = ".artifacts/bin/agent_harness run --runtime claude --scenario approval"
+
+[tasks."diag:opencode:smoke"]
+description = "Run a live OpenCode smoke scenario with the plugin harness enabled"
+depends = ["diag:install:opencode"]
+run = ".artifacts/bin/agent_harness run --runtime opencode --scenario smoke"
+
+[tasks."diag:opencode:bash"]
+description = "Run a live OpenCode Bash scenario with the plugin harness enabled"
+depends = ["diag:install:opencode"]
+run = ".artifacts/bin/agent_harness run --runtime opencode --scenario bash"
+
+[tasks."diag:opencode:approval"]
+description = "Run a live OpenCode approval scenario with the plugin harness enabled"
+depends = ["diag:install:opencode"]
+run = ".artifacts/bin/agent_harness run --runtime opencode --scenario approval"
+
+[tasks."hk:validate"]
+description = "Validate the hk configuration"
+run = "hk validate"
+
+[tasks."assets:check"]
+description = "Verify generated README assets are current"
+run = """
+before_diff="$(git diff --no-ext-diff --binary -- assets)"
+mise run generate-assets
+after_diff="$(git diff --no-ext-diff --binary -- assets)"
+if [[ "${before_diff}" != "${after_diff}" ]]; then
+  git diff -- assets
+  exit 1
+fi
+"""
+
+[tasks."hk:check"]
+description = "Run the hk check profile"
+run = "hk check"
+
+[tasks."hk:check:all"]
+description = "Run hk checks against the full tracked workspace"
+run = "hk check --all"
+
+[tasks."hk:fix"]
+description = "Run the hk fix profile"
+run = "hk fix"
+
+[tasks."hk:fix:all"]
+description = "Run hk fixes against the full tracked workspace"
+run = "hk fix --all"
+
+[tasks."hk:pre-commit"]
+description = "Run the hk pre-commit hook locally"
+run = "hk run pre-commit"
+
+[tasks."hk:pre-push"]
+description = "Run the hk pre-push hook locally"
+run = "hk run pre-push"
+
+[tasks."hk:install"]
+description = "Install hk git hooks once this project lives in its own git repository"
+run = """
+prefix="$(git rev-parse --show-prefix)"
+if [ -n "$prefix" ]; then
+  echo "hk install is intentionally blocked while this project is nested under another git repository ($prefix)." >&2
+  echo "Move it into its own repository, then rerun mise run hk:install." >&2
+  exit 1
+fi
+HK_MISE=1 hk install --mise
+"""

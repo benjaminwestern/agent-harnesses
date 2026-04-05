@@ -1,0 +1,9 @@
+{
+  "session_id": "session-test-001",
+  "transcript_path": "/tmp/codex-session-test/transcript.md",
+  "cwd": "/workspace/agentic-control",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-5.4",
+  "turn_id": "turn-test-001",
+  "user_prompt": "List the files in this repository and explain what the harness does."
+}

@@ -1,0 +1,13 @@
+{
+  "session_id": "session-test-001",
+  "transcript_path": "/tmp/codex-session-test/transcript.md",
+  "cwd": "/workspace/agentic-control",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.4",
+  "turn_id": "turn-test-001",
+  "tool_name": "Bash",
+  "tool_use_id": "tool-test-001",
+  "tool_input": {
+    "command": "pwd && ls -1 runtimes/codex"
+  }
+}
