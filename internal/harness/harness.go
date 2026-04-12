@@ -25,6 +25,7 @@ const (
 	RuntimeGemini   Runtime = "gemini"
 	RuntimeClaude   Runtime = "claude"
 	RuntimeOpenCode Runtime = "opencode"
+	RuntimePi       Runtime = "pi"
 )
 
 type bindingSpecKind int
@@ -132,10 +133,10 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 func printUsage(w io.Writer) {
 	fmt.Fprint(w,
 		"Usage:\n"+
-			"  agent_harness emit --runtime <codex|gemini|claude|opencode> [emit flags]\n"+
-			"  agent_harness install --runtime <codex|gemini|claude|opencode> [--scope repo|global] [helper flags]\n"+
-			"  agent_harness uninstall --runtime <codex|gemini|claude|opencode> [--scope repo|global]\n"+
-			"  agent_harness run --runtime <codex|gemini|claude|opencode> [--scenario smoke|bash|approval] [run flags]\n"+
+			"  agent_harness emit --runtime <codex|gemini|claude|opencode|pi> [emit flags]\n"+
+			"  agent_harness install --runtime <codex|gemini|claude|opencode|pi> [--scope repo|global] [helper flags]\n"+
+			"  agent_harness uninstall --runtime <codex|gemini|claude|opencode|pi> [--scope repo|global]\n"+
+			"  agent_harness run --runtime <codex|gemini|claude|opencode|pi> [--scenario smoke|bash|approval] [run flags]\n"+
 			"  agent_harness listen --socket-path <path>\n\n"+
 			"Primary use cases:\n"+
 			"  install     Safely add only Agentic Control-managed hook or plugin config.\n"+
@@ -160,7 +161,7 @@ func printUsage(w io.Writer) {
 			"  --claude-permission-mode <mode>\n"+
 			"  --extra-arg <arg>\n\n"+
 			"For backwards compatibility, the bare emit form also works:\n"+
-			"  agent_harness --runtime <codex|gemini|claude|opencode> [emit flags]\n")
+			"  agent_harness --runtime <codex|gemini|claude|opencode|pi> [emit flags]\n")
 }
 
 func parseEmitArgs(args []string) (EmitOptions, error) {
@@ -270,6 +271,8 @@ func parseRuntime(value string) (Runtime, error) {
 		return RuntimeClaude, nil
 	case string(RuntimeOpenCode):
 		return RuntimeOpenCode, nil
+	case string(RuntimePi):
+		return RuntimePi, nil
 	default:
 		return "", fmt.Errorf("invalid runtime: %s", value)
 	}
@@ -339,6 +342,8 @@ func NormalizePayload(runtime Runtime, provenance string, payload []byte) (*cont
 		return normalizeClaudePayload(provenance, payload)
 	case RuntimeOpenCode:
 		return normalizeOpenCodePayload(provenance, payload)
+	case RuntimePi:
+		return normalizePiPayload(provenance, payload)
 	default:
 		return nil, fmt.Errorf("unsupported runtime: %s", runtime)
 	}
@@ -555,6 +560,39 @@ func normalizeOpenCodePayload(provenance string, payload []byte) (*contract.Harn
 	}, nil
 }
 
+func normalizePiPayload(provenance string, payload []byte) (*contract.HarnessEvent, error) {
+	root, err := decodeJSONObject(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	nativeEventName := valueOr(stringFromObject(root, "hook_event_name"), "Unknown")
+	eventType := piEventType(nativeEventName, boolValue(root["is_error"]), stringFromObject(root, "stop_reason"))
+	summary := piSummary(nativeEventName, root)
+
+	return &contract.HarnessEvent{
+		SchemaVersion:   contract.HarnessSchemaVersion,
+		RecordedAtMS:    time.Now().UnixMilli(),
+		Runtime:         string(RuntimePi),
+		Provenance:      provenance,
+		NativeEventName: nativeEventName,
+		EventType:       eventType,
+		Summary:         summary,
+		SessionID:       firstNonNilString(stringFromObject(root, "session_id"), stringFromObject(root, "session_file")),
+		TurnID:          stringFromObject(root, "turn_id"),
+		ToolCallID:      stringFromObject(root, "tool_call_id"),
+		ToolName:        stringFromObject(root, "tool_name"),
+		Command:         piCommand(root),
+		PromptText:      stringFromObject(root, "prompt_text"),
+		CWD:             stringFromObject(root, "cwd"),
+		Model:           stringFromObject(root, "model"),
+		TranscriptPath:  stringFromObject(root, "session_file"),
+		SessionSource:   stringFromObject(root, "source"),
+		Reason:          firstNonNilString(stringFromObject(root, "reason"), stringFromObject(root, "error_message"), stringFromObject(root, "stop_reason")),
+		ExitCode:        intFromObject(root, "exit_code"),
+	}, nil
+}
+
 func collectBindings(specs []BindingSpec) map[string]string {
 	if len(specs) == 0 {
 		return nil
@@ -674,6 +712,36 @@ func openCodeEventType(nativeEventName string) string {
 		return "tool.started"
 	case "tool.execute.after":
 		return "tool.finished"
+	default:
+		return "runtime.event"
+	}
+}
+
+func piEventType(nativeEventName string, isError *bool, stopReason *string) string {
+	switch nativeEventName {
+	case "session_start":
+		return "session.started"
+	case "session_shutdown":
+		return "session.ended"
+	case "input":
+		return "turn.user_prompt_submitted"
+	case "tool_execution_start":
+		return "tool.started"
+	case "tool_execution_end":
+		if isError != nil && *isError {
+			return "tool.failed"
+		}
+		return "tool.finished"
+	case "agent_end":
+		if stopReason != nil {
+			switch *stopReason {
+			case "aborted":
+				return "turn.stopped"
+			case "error":
+				return "turn.failed"
+			}
+		}
+		return "turn.finished"
 	default:
 		return "runtime.event"
 	}
@@ -882,6 +950,78 @@ func openCodeSummary(nativeEventName string, root map[string]any) string {
 	default:
 		return nativeEventName
 	}
+}
+
+func piSummary(nativeEventName string, root map[string]any) string {
+	switch nativeEventName {
+	case "session_start":
+		return fmt.Sprintf("Pi session started via %s", valueOr(stringFromObject(root, "source"), "startup"))
+	case "session_shutdown":
+		return "Pi session ended"
+	case "input":
+		if prompt := stringFromObject(root, "prompt_text"); prompt != nil {
+			return fmt.Sprintf("Pi prompt submitted: %s", truncate(*prompt, 120))
+		}
+		return "Pi prompt submitted"
+	case "tool_execution_start":
+		toolName := valueOr(stringFromObject(root, "tool_name"), "tool")
+		if command := piCommand(root); command != nil {
+			return fmt.Sprintf("Pi about to run %s: %s", toolName, truncate(*command, 160))
+		}
+		return fmt.Sprintf("Pi about to run %s", toolName)
+	case "tool_execution_end":
+		toolName := valueOr(stringFromObject(root, "tool_name"), "tool")
+		if isError := boolFromObject(root, "is_error"); isError != nil && *isError {
+			if reason := firstNonNilString(stringFromObject(root, "error_message"), stringFromObject(root, "result_text")); reason != nil {
+				return fmt.Sprintf("Pi %s failed: %s", toolName, truncate(*reason, 120))
+			}
+			return fmt.Sprintf("Pi %s failed", toolName)
+		}
+		if result := stringFromObject(root, "result_text"); result != nil {
+			return fmt.Sprintf("Pi finished %s: %s", toolName, truncate(*result, 120))
+		}
+		return fmt.Sprintf("Pi finished %s", toolName)
+	case "agent_end":
+		if stopReason := stringFromObject(root, "stop_reason"); stopReason != nil {
+			switch *stopReason {
+			case "aborted":
+				return "Pi turn stopped"
+			case "error":
+				if message := stringFromObject(root, "error_message"); message != nil {
+					return fmt.Sprintf("Pi turn failed: %s", truncate(*message, 120))
+				}
+				return "Pi turn failed"
+			}
+		}
+		if message := stringFromObject(root, "assistant_text"); message != nil {
+			return fmt.Sprintf("Pi turn finished: %s", truncate(*message, 120))
+		}
+		return "Pi turn finished"
+	default:
+		return nativeEventName
+	}
+}
+
+func piCommand(root map[string]any) *string {
+	if args := objectFromObject(root, "args"); args != nil {
+		return firstNonNilString(
+			stringFromObject(args, "command"),
+			stringFromObject(args, "path"),
+			stringFromObject(args, "url"),
+		)
+	}
+	if input := objectFromObject(root, "tool_input"); input != nil {
+		return firstNonNilString(
+			stringFromObject(input, "command"),
+			stringFromObject(input, "path"),
+			stringFromObject(input, "url"),
+		)
+	}
+	return firstNonNilString(
+		stringFromObject(root, "command"),
+		stringFromObject(root, "path"),
+		stringFromObject(root, "url"),
+	)
 }
 
 func claudeToolSummary(prefix string, root map[string]any) string {

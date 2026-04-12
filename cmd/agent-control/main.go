@@ -18,6 +18,7 @@ import (
 	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/codex"
 	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/gemini"
 	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/opencode"
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/pi"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 )
 
@@ -66,6 +67,7 @@ func serve(args []string) error {
 		claude.NewProvider(emit),
 		gemini.NewProvider(emit),
 		opencode.NewProvider(emit),
+		pi.NewProvider(emit),
 	)
 
 	server := internal.NewRPCServer(service)

@@ -1,0 +1,13 @@
+{
+  "hook_event_name": "tool_execution_start",
+  "session_file": "/Users/example/.pi/agent/sessions/--Users-example-code-agentic-control--/2026-04-12_pi-session.jsonl",
+  "session_id": "/Users/example/.pi/agent/sessions/--Users-example-code-agentic-control--/2026-04-12_pi-session.jsonl",
+  "cwd": "/Users/example/code/agentic-control",
+  "model": "openai/gpt-5",
+  "tool_call_id": "call_pi_001",
+  "tool_name": "bash",
+  "args": {
+    "command": "pwd && ls -1 runtimes/pi"
+  },
+  "command": "pwd && ls -1 runtimes/pi"
+}

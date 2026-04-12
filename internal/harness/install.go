@@ -19,17 +19,19 @@ type InstallOptions struct {
 }
 
 type runtimeInstallPaths struct {
-	WorkspaceRoot  string
-	RuntimeRoot    string
-	InstallRoot    string
-	ManifestPath   string
-	HelperBinary   string
-	ConfigPath     string
-	PluginPath     string
-	PluginConfig   string
-	PluginSource   string
-	SettingsPath   string
-	ClaudeSettings string
+	WorkspaceRoot     string
+	RuntimeRoot       string
+	InstallRoot       string
+	ManifestPath      string
+	HelperBinary      string
+	ConfigPath        string
+	PluginPath        string
+	PluginConfig      string
+	PluginSource      string
+	SettingsPath      string
+	ClaudeSettings    string
+	PiExtensionPath   string
+	PiExtensionConfig string
 }
 
 type installManifest struct {
@@ -43,6 +45,7 @@ type installManifest struct {
 	PluginPath       string   `json:"plugin_path,omitempty"`
 	PluginConfigPath string   `json:"plugin_config_path,omitempty"`
 	SettingsPath     string   `json:"settings_path,omitempty"`
+	ExtensionPath    string   `json:"extension_path,omitempty"`
 	HookNames        []string `json:"hook_names,omitempty"`
 	Events           []string `json:"events,omitempty"`
 	ScopeDefaulted   bool     `json:"scope_defaulted,omitempty"`
@@ -112,6 +115,14 @@ func runInstall(args []string, stdout, stderr io.Writer) error {
 		manifest.PluginConfigPath = paths.PluginConfig
 		manifest.HelperCommand = shellCommand(paths.HelperBinary, manifest.HelperArgs)
 		if err := installOpenCodeBundle(paths, manifest.HelperArgs); err != nil {
+			return err
+		}
+	case RuntimePi:
+		manifest.HelperArgs = append([]string(nil), piHelperArgs(options.HelperArgs)...)
+		manifest.ExtensionPath = paths.PiExtensionPath
+		manifest.PluginConfigPath = paths.PiExtensionConfig
+		manifest.HelperCommand = shellCommand(paths.HelperBinary, manifest.HelperArgs)
+		if err := installPiBundle(paths, manifest.HelperBinary, manifest.HelperArgs); err != nil {
 			return err
 		}
 	default:
@@ -193,6 +204,10 @@ func runUninstall(args []string, stdout, stderr io.Writer) error {
 		}
 	case RuntimeOpenCode:
 		if err := uninstallOpenCodeBundle(paths); err != nil {
+			return err
+		}
+	case RuntimePi:
+		if err := uninstallPiBundle(paths); err != nil {
 			return err
 		}
 	default:
@@ -316,6 +331,17 @@ func resolveInstallPaths(runtime Runtime, scope, workspaceRoot string) (runtimeI
 		paths.PluginPath = filepath.Join(paths.RuntimeRoot, "plugins", "agentic-control.js")
 		paths.PluginConfig = filepath.Join(paths.InstallRoot, "plugin-config.json")
 		paths.PluginSource = filepath.Join(workspaceRoot, "runtimes", "opencode", "plugin.js")
+	case RuntimePi:
+		if scope == "global" {
+			paths.RuntimeRoot = firstNonEmptyEnv("PI_CODING_AGENT_DIR", filepath.Join(homeDir, ".pi", "agent"))
+		} else {
+			paths.RuntimeRoot = filepath.Join(workspaceRoot, ".pi")
+		}
+		paths.InstallRoot = filepath.Join(paths.RuntimeRoot, "agentic-control")
+		paths.HelperBinary = filepath.Join(paths.InstallRoot, "bin", "agent_harness")
+		paths.ManifestPath = filepath.Join(paths.InstallRoot, "install-manifest.json")
+		paths.PiExtensionPath = filepath.Join(paths.RuntimeRoot, "extensions", "agentic-control.ts")
+		paths.PiExtensionConfig = filepath.Join(paths.InstallRoot, "extension-config.json")
 	default:
 		return runtimeInstallPaths{}, fmt.Errorf("unsupported runtime: %s", runtime)
 	}
@@ -351,6 +377,8 @@ func managedPaths(paths runtimeInstallPaths, runtime Runtime) []string {
 		result = append(result, paths.ClaudeSettings)
 	case RuntimeOpenCode:
 		result = append(result, paths.PluginPath, paths.PluginConfig)
+	case RuntimePi:
+		result = append(result, paths.PiExtensionPath, paths.PiExtensionConfig)
 	}
 	return result
 }
@@ -512,6 +540,174 @@ func uninstallOpenCodeBundle(paths runtimeInstallPaths) error {
 		return err
 	}
 	return nil
+}
+
+func installPiBundle(paths runtimeInstallPaths, helperBinary string, helperArgs []string) error {
+	if err := os.MkdirAll(filepath.Dir(paths.PiExtensionPath), 0o755); err != nil {
+		return err
+	}
+	config := map[string]any{
+		"helperBinary": helperBinary,
+		"helperArgs":   helperArgs,
+	}
+	if err := writeJSONFile(paths.PiExtensionConfig, config); err != nil {
+		return err
+	}
+	return os.WriteFile(paths.PiExtensionPath, []byte(piExtensionSource()), 0o644)
+}
+
+func uninstallPiBundle(paths runtimeInstallPaths) error {
+	_ = os.Remove(paths.PiExtensionPath)
+	_ = os.Remove(paths.PiExtensionConfig)
+	if isEmptyDir(filepath.Dir(paths.PiExtensionPath)) {
+		_ = os.Remove(filepath.Dir(paths.PiExtensionPath))
+	}
+	if err := os.RemoveAll(paths.InstallRoot); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func piExtensionSource() string {
+	return `import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const configPath = path.resolve(__dirname, "../agentic-control/extension-config.json");
+
+function readConfig(): { helperBinary: string; helperArgs: string[] } {
+  const raw = JSON.parse(readFileSync(configPath, "utf8"));
+  return {
+    helperBinary: String(raw.helperBinary ?? ""),
+    helperArgs: Array.isArray(raw.helperArgs) ? raw.helperArgs.map((value) => String(value)) : [],
+  };
+}
+
+function modelString(model: any): string | undefined {
+  if (!model || typeof model !== "object") return undefined;
+  const provider = typeof model.provider === "string" ? model.provider : undefined;
+  const id = typeof model.id === "string" ? model.id : undefined;
+  if (provider && id) return provider + "/" + id;
+  return id;
+}
+
+function firstText(message: any): string | undefined {
+  const content = Array.isArray(message?.content) ? message.content : [];
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block && typeof block === "object" && block.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    }
+  }
+  if (parts.length === 0) return undefined;
+  return parts.join("");
+}
+
+function commandFromArgs(args: any): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  for (const key of ["command", "path", "url"]) {
+    const value = (args as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+export default function(pi: ExtensionAPI) {
+  const config = readConfig();
+
+  function emit(payload: Record<string, unknown>) {
+    if (!config.helperBinary) return;
+    const child = spawn(config.helperBinary, config.helperArgs, {
+      stdio: ["pipe", "ignore", "ignore"],
+      env: process.env,
+      detached: true,
+    });
+    child.on("error", () => {});
+    child.stdin.end(JSON.stringify(payload));
+    child.unref();
+  }
+
+  function basePayload(ctx: any, extra: Record<string, unknown> = {}) {
+    return {
+      session_file: ctx.sessionManager?.getSessionFile?.(),
+      session_id: ctx.sessionManager?.getSessionFile?.(),
+      cwd: ctx.cwd,
+      model: modelString(ctx.model),
+      ...extra,
+    };
+  }
+
+  pi.on("session_start", async (event, ctx) => {
+    emit(basePayload(ctx, {
+      hook_event_name: "session_start",
+      source: event.reason,
+    }));
+  });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    emit(basePayload(ctx, {
+      hook_event_name: "session_shutdown",
+    }));
+  });
+
+  pi.on("input", async (event, ctx) => {
+    emit(basePayload(ctx, {
+      hook_event_name: "input",
+      prompt_text: event.text,
+      source: event.source,
+    }));
+  });
+
+  pi.on("tool_execution_start", async (event, ctx) => {
+    emit(basePayload(ctx, {
+      hook_event_name: "tool_execution_start",
+      tool_call_id: event.toolCallId,
+      tool_name: event.toolName,
+      args: event.args,
+      command: commandFromArgs(event.args),
+    }));
+  });
+
+  pi.on("tool_execution_end", async (event, ctx) => {
+    const resultText = Array.isArray(event.result?.content)
+      ? event.result.content
+          .filter((block: any) => block && typeof block === "object" && block.type === "text" && typeof block.text === "string")
+          .map((block: any) => block.text)
+          .join("\n")
+      : undefined;
+    const exitCode = typeof event.result?.details?.exitCode === "number"
+      ? event.result.details.exitCode
+      : typeof event.result?.details?.exit_code === "number"
+        ? event.result.details.exit_code
+        : undefined;
+    emit(basePayload(ctx, {
+      hook_event_name: "tool_execution_end",
+      tool_call_id: event.toolCallId,
+      tool_name: event.toolName,
+      args: event.args,
+      command: commandFromArgs(event.args),
+      result_text: resultText,
+      exit_code: exitCode,
+      is_error: Boolean(event.isError),
+      error_message: typeof event.result?.details?.error === "string" ? event.result.details.error : undefined,
+    }));
+  });
+
+  pi.on("agent_end", async (event, ctx) => {
+    const messages = Array.isArray(event.messages) ? event.messages : [];
+    const lastAssistant = [...messages].reverse().find((message: any) => message?.role === "assistant");
+    emit(basePayload(ctx, {
+      hook_event_name: "agent_end",
+      assistant_text: firstText(lastAssistant),
+      stop_reason: typeof lastAssistant?.stopReason === "string" ? lastAssistant.stopReason : undefined,
+      error_message: typeof lastAssistant?.errorMessage === "string" ? lastAssistant.errorMessage : undefined,
+    }));
+  });
+}
+`
 }
 
 func readManifest(path string) (installManifest, error) {
@@ -683,6 +879,11 @@ func claudeHelperArgs(extra []string) []string {
 
 func openCodeHelperArgs(extra []string) []string {
 	args := []string{"--runtime", "opencode", "--provenance", "native_plugin"}
+	return append(args, extra...)
+}
+
+func piHelperArgs(extra []string) []string {
+	args := []string{"--runtime", "pi", "--provenance", "native_extension"}
 	return append(args, extra...)
 }
 

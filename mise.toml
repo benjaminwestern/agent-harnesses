@@ -110,9 +110,19 @@ for FIXTURE in runtimes/opencode/fixtures/*.json; do
 done
 """
 
+[tasks."diag:fixtures:pi"]
+description = "Replay all pi fixtures through the shared helper"
+depends = ["build"]
+run = """
+for FIXTURE in runtimes/pi/fixtures/*.json; do
+  echo "==> $FIXTURE"
+  .artifacts/bin/agent_harness --runtime pi --provenance native_extension --stdout < "$FIXTURE"
+done
+"""
+
 [tasks."diag:fixtures:all"]
 description = "Replay every runtime fixture through the shared helper"
-depends = ["diag:fixtures:codex", "diag:fixtures:gemini", "diag:fixtures:claude", "diag:fixtures:opencode"]
+depends = ["diag:fixtures:codex", "diag:fixtures:gemini", "diag:fixtures:claude", "diag:fixtures:opencode", "diag:fixtures:pi"]
 run = "true"
 
 [tasks."diag:install:codex"]
@@ -134,6 +144,11 @@ run = ".artifacts/bin/agent_harness install --runtime claude --scope repo --sock
 description = "Install the global OpenCode bundle for live testing"
 depends = ["build"]
 run = ".artifacts/bin/agent_harness install --runtime opencode --scope global --socket-env AGENT_HARNESS_SOCKET"
+
+[tasks."diag:install:pi"]
+description = "Install the repo-local pi bundle for live testing"
+depends = ["build"]
+run = ".artifacts/bin/agent_harness install --runtime pi --scope repo --socket-env AGENT_HARNESS_SOCKET"
 
 [tasks."diag:codex:smoke"]
 description = "Run a live Codex smoke scenario with the hook harness enabled"
@@ -194,6 +209,21 @@ run = ".artifacts/bin/agent_harness run --runtime opencode --scenario bash"
 description = "Run a live OpenCode approval scenario with the plugin harness enabled"
 depends = ["diag:install:opencode"]
 run = ".artifacts/bin/agent_harness run --runtime opencode --scenario approval"
+
+[tasks."diag:pi:smoke"]
+description = "Run a pi smoke scenario with the extension harness enabled"
+depends = ["diag:install:pi"]
+run = ".artifacts/bin/agent_harness run --runtime pi --scenario smoke"
+
+[tasks."diag:pi:bash"]
+description = "Run a pi tool scenario with the extension harness enabled"
+depends = ["diag:install:pi"]
+run = ".artifacts/bin/agent_harness run --runtime pi --scenario bash"
+
+[tasks."diag:pi:approval"]
+description = "Run a pi write scenario with the extension harness enabled"
+depends = ["diag:install:pi"]
+run = ".artifacts/bin/agent_harness run --runtime pi --scenario approval"
 
 [tasks."hk:validate"]
 description = "Validate the hk configuration"

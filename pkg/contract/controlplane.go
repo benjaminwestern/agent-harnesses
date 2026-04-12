@@ -22,6 +22,7 @@ const (
 	TransportAgentSDK   Transport = "agent_sdk"
 	TransportACP        Transport = "acp"
 	TransportHTTPServer Transport = "http_server"
+	TransportRPC        Transport = "rpc"
 )
 
 type SessionStatus string

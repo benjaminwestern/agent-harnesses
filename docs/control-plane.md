@@ -1,8 +1,8 @@
 # Control-plane
 
 Use the control-plane when your application owns the agent session lifecycle.
-The passive harness owns observed hook and plugin translation. The
-control-plane owns app-managed sessions.
+The passive harness owns observed hook, plugin, and extension translation.
+The control-plane owns app-managed sessions.
 
 The controller boundaries are:
 
@@ -10,6 +10,7 @@ The controller boundaries are:
 - Gemini via `gemini --acp`
 - Claude via a local bridge to `@anthropic-ai/claude-agent-sdk`
 - OpenCode via `opencode serve`
+- pi via `pi --mode rpc`
 
 ## What the control-plane provides
 
@@ -376,5 +377,27 @@ the remote session status at all.
 does not delete the underlying OpenCode session record. That keeps
 `resume_by_provider_id` truthful and lets host applications re-attach later
 with the provider session ID.
+
+pi currently supports a narrower app-managed surface:
+
+- start
+- resume by session file path
+- send
+- interrupt
+- list active controller-owned sessions
+- stop
+
+The pi provider runs `pi --mode rpc --no-extensions`, uses `get_state` for
+bootstrap, `new_session` for fresh controller-owned sessions, and
+`switch_session` for resume by provider session ID. The provider session ID is
+pi's session file path, not an opaque remote token. The controller also reads
+streamed RPC events such as `message_update`, `tool_execution_start`,
+`tool_execution_end`, and `agent_end` to produce normalized runtime events.
+
+pi does not reach the Codex and Claude parity bar because Agentic Control does
+not currently expose generic host-owned approval or user-input workflows for
+pi. pi can build those flows with extensions and its extension UI sub-protocol,
+but the controller intentionally keeps managed pi sessions deterministic by
+starting them with `--no-extensions`.
 
 </details>

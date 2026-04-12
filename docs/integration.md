@@ -7,8 +7,8 @@ Choose your path first:
 
 - Use `agent_control` when your application owns session lifecycle and needs to
   start, resume, interrupt, and answer runtime requests directly.
-- Use `agent_harness` when your application only needs passive hook or plugin
-  observation from sessions launched elsewhere.
+- Use `agent_harness` when your application only needs passive hook, plugin,
+  or extension observation from sessions launched elsewhere.
 
 The installation surface is intentionally small. Use the shared Go installer,
 `agent_harness install`, with `--runtime` and, when needed, `--scope`, rather
@@ -95,7 +95,7 @@ Use two lanes:
 
 - Product lane: a local receiver that updates your app state.
 - Debug lane: the `listen` command plus raw stdout printing when you need to
-  inspect exact hook payload translation.
+  inspect exact hook, plugin, or extension payload translation.
 
 The helper supports both without changing the runtime hook shape.
 

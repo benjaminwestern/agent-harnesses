@@ -223,6 +223,13 @@ func ensureRuntimeBundle(workspaceRoot string, runtime Runtime) error {
 			return nil
 		}
 		return errors.New("missing OpenCode bundle; run `.artifacts/bin/agent_harness install --runtime opencode` first")
+	case RuntimePi:
+		repoExtension := filepath.Join(workspaceRoot, ".pi", "extensions", "agentic-control.ts")
+		globalExtension := filepath.Join(firstNonEmptyEnv("PI_CODING_AGENT_DIR", filepath.Join(mustUserHomeDir(), ".pi", "agent")), "extensions", "agentic-control.ts")
+		if fileExists(repoExtension) || fileExists(globalExtension) {
+			return nil
+		}
+		return errors.New("missing pi bundle; run `.artifacts/bin/agent_harness install --runtime pi --scope repo` first")
 	default:
 		return nil
 	}
@@ -269,12 +276,17 @@ func runtimeCommand(workspaceRoot, promptText string, options RunOptions) ([]str
 		return append([]string{"claude", "--settings", settingsPath, "--permission-mode", options.ClaudePermissionMode}, append(options.ExtraArgs, promptText)...), nil
 	case RuntimeOpenCode:
 		return append([]string{"opencode", "run"}, append(options.ExtraArgs, promptText)...), nil
+	case RuntimePi:
+		return append([]string{"pi", "-p"}, append(options.ExtraArgs, promptText)...), nil
 	default:
 		return nil, fmt.Errorf("unsupported runtime: %s", options.Runtime)
 	}
 }
 
 func ensureInteractiveRunEnvironment(runtime Runtime) error {
+	if runtime == RuntimePi {
+		return nil
+	}
 	stdinInfo, err := os.Stdin.Stat()
 	if err != nil {
 		return err
