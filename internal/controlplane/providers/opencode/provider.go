@@ -206,6 +206,14 @@ type remotePartEnvelope struct {
 	Delta string     `json:"delta"`
 }
 
+type remotePartDeltaEnvelope struct {
+	SessionID string `json:"sessionID"`
+	MessageID string `json:"messageID"`
+	PartID    string `json:"partID"`
+	Field     string `json:"field"`
+	Delta     string `json:"delta"`
+}
+
 type remotePart struct {
 	ID        string           `json:"id"`
 	SessionID string           `json:"sessionID"`
@@ -1027,6 +1035,11 @@ func (p *Provider) handleEvent(event remoteEvent) {
 		if json.Unmarshal(event.Properties, &props) == nil {
 			p.handleMessagePartUpdated(props)
 		}
+	case "message.part.delta":
+		var props remotePartDeltaEnvelope
+		if json.Unmarshal(event.Properties, &props) == nil {
+			p.handleMessagePartDelta(props)
+		}
 	}
 }
 
@@ -1114,6 +1127,10 @@ func (p *Provider) handleSessionIdle(providerSessionID string) {
 	turnID := sess.activeTurnIDSnapshot()
 	sess.clearActiveTurnID()
 	sess.setLastError("")
+	if turnID == "" {
+		sess.setStatus(contract.SessionIdle)
+		return
+	}
 	if interrupted {
 		sess.setStatus(contract.SessionInterrupted)
 		p.resolvePendingRequests(sess, "session.idle", "interrupted")
@@ -1377,7 +1394,30 @@ func (p *Provider) handleMessageUpdated(message remoteMessage) {
 		if sess.activeTurnIDSnapshot() == "" && turnID != "" {
 			sess.setActiveTurnID(turnID)
 		}
+		if message.Time.Completed > 0 {
+			p.completeTurnFromAssistantMessage(sess, turnID)
+		}
 	}
+}
+
+func (p *Provider) handleMessagePartDelta(update remotePartDeltaEnvelope) {
+	if update.Field != "text" || strings.TrimSpace(update.Delta) == "" {
+		return
+	}
+	sess, ok := p.getSessionByProviderID(update.SessionID)
+	if !ok {
+		return
+	}
+	turnID := sess.canonicalTurnID(update.MessageID)
+	sess.appendAssistantSummary(update.Delta)
+	p.emit(p.newEvent(sess, "assistant.message.delta", "message.part.delta", turnID,
+		truncate(update.Delta, 160),
+		map[string]any{
+			"delta":      update.Delta,
+			"message_id": update.MessageID,
+			"part_id":    update.PartID,
+		},
+	))
 }
 
 func (p *Provider) handleMessagePartUpdated(update remotePartEnvelope) {
@@ -1404,6 +1444,26 @@ func (p *Provider) handleMessagePartUpdated(update remotePartEnvelope) {
 	case "tool":
 		p.handleToolPartUpdated(sess, turnID, update.Part)
 	}
+}
+
+func (p *Provider) completeTurnFromAssistantMessage(sess *session, turnID string) {
+	if turnID == "" {
+		turnID = sess.activeTurnIDSnapshot()
+	}
+	if turnID == "" || sess.statusSnapshot() == contract.SessionIdle {
+		return
+	}
+	sess.clearActiveTurnID()
+	sess.setLastError("")
+	sess.setStatus(contract.SessionIdle)
+	sess.clearPendingRequests()
+	summary := "OpenCode turn completed"
+	if text := sess.assistantSummarySnapshot(); text != "" {
+		summary = fmt.Sprintf("OpenCode turn completed: %s", text)
+	}
+	p.emit(p.newEvent(sess, "turn.completed", "message.updated", turnID, summary,
+		map[string]any{"status": string(contract.SessionIdle)},
+	))
 }
 
 func (p *Provider) handleToolPartUpdated(sess *session, turnID string, part remotePart) {
@@ -1501,6 +1561,9 @@ func (p *Provider) applyResync(ctx context.Context) error {
 		providerSessionID := sess.providerSessionIDSnapshot()
 		status, ok := statuses[providerSessionID]
 		if !ok {
+			if p.remoteSessionExists(ctx, sess) {
+				continue
+			}
 			p.handleMissingSessionAfterReconnect(sess)
 			continue
 		}
@@ -1558,6 +1621,12 @@ func (p *Provider) fetchRemoteSessionStatuses(ctx context.Context) (map[string]r
 		return nil, err
 	}
 	return statuses, nil
+}
+
+func (p *Provider) remoteSessionExists(ctx context.Context, sess *session) bool {
+	var remote remoteSession
+	path := fmt.Sprintf("/session/%s", url.PathEscape(sess.providerSessionIDSnapshot()))
+	return p.doJSON(ctx, http.MethodGet, path, sess.cwdSnapshot(), nil, &remote) == nil
 }
 
 func (p *Provider) syncSessionStatusFromRemote(ctx context.Context, sess *session) (contract.SessionStatus, error) {
@@ -1968,6 +2037,17 @@ func (s *session) setAssistantSummary(value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastAssistantSummary = truncate(trimmed, 160)
+	s.updatedAtMS = time.Now().UnixMilli()
+}
+
+func (s *session) appendAssistantSummary(value string) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastAssistantSummary = truncate(s.lastAssistantSummary+trimmed, 160)
 	s.updatedAtMS = time.Now().UnixMilli()
 }
 
