@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	runtimeName  = "opencode"
-	loopbackHost = "127.0.0.1"
+	runtimeName                 = "opencode"
+	loopbackHost                = "127.0.0.1"
+	toolCompletionDebounceDelay = 1500 * time.Millisecond
 )
 
 type eventSink func(contract.RuntimeEvent)
@@ -54,7 +55,10 @@ type session struct {
 	activeTurnID         string
 	lastAssistantSummary string
 	messageTurns         map[string]string
+	completedTurns       map[string]struct{}
 	pendingRequests      map[string]pendingRequest
+	toolActivity         bool
+	turnGeneration       int64
 	toolStates           map[string]string
 	provider             *Provider
 }
@@ -414,8 +418,12 @@ func (p *Provider) SendInput(
 	if err != nil {
 		return nil, err
 	}
-	if status := sess.statusSnapshot(); status == contract.SessionRunning || status == contract.SessionWaitingApproval || status == contract.SessionWaitingUserInput {
+	status := sess.statusSnapshot()
+	if sess.activeTurnIDSnapshot() != "" && (status == contract.SessionRunning || status == contract.SessionWaitingApproval || status == contract.SessionWaitingUserInput) {
 		return nil, errors.New("opencode session already has an active turn")
+	}
+	if sess.pendingRequestCount() > 0 {
+		return nil, errors.New("opencode session has pending requests")
 	}
 
 	messageID := newIdentifier("msg")
@@ -431,7 +439,7 @@ func (p *Provider) SendInput(
 	if model := requestModel(sess, request.Metadata); model != nil {
 		body["model"] = model
 	}
-	if agent := metadataString(request.Metadata, "agent"); agent != "" {
+	if agent := opencodeAgentName(metadataString(request.Metadata, "agent")); agent != "" {
 		body["agent"] = agent
 	}
 	if system := metadataString(request.Metadata, "system"); system != "" {
@@ -452,6 +460,7 @@ func (p *Provider) SendInput(
 	sess.setStatus(contract.SessionRunning)
 	sess.setLastError("")
 	sess.setAssistantSummary("")
+	sess.setToolActivity(false)
 
 	event := p.newEvent(sess, "turn.started", "session.prompt_async", messageID,
 		fmt.Sprintf("Started OpenCode turn: %s", truncate(request.Text, 120)),
@@ -1141,6 +1150,7 @@ func (p *Provider) handleSessionIdle(providerSessionID string) {
 		sess.setStatus(contract.SessionIdle)
 		return
 	}
+	sess.markTurnCompleted(turnID)
 	sess.setStatus(contract.SessionIdle)
 	p.resolvePendingRequests(sess, "session.idle", "completed")
 	if previous == contract.SessionInterrupted || previous == contract.SessionErrored {
@@ -1388,6 +1398,9 @@ func (p *Provider) handleMessageUpdated(message remoteMessage) {
 		if turnID == "" {
 			turnID = sess.activeTurnIDSnapshot()
 		}
+		if turnID != "" && sess.turnCompleted(turnID) {
+			return
+		}
 		if turnID != "" {
 			sess.storeMessageTurn(message.ID, turnID)
 		}
@@ -1408,6 +1421,9 @@ func (p *Provider) handleMessagePartDelta(update remotePartDeltaEnvelope) {
 	if !ok {
 		return
 	}
+	if sess.isActivePromptMessage(update.MessageID) {
+		return
+	}
 	turnID := sess.canonicalTurnID(update.MessageID)
 	sess.appendAssistantSummary(update.Delta)
 	p.emit(p.newEvent(sess, "assistant.message.delta", "message.part.delta", turnID,
@@ -1423,6 +1439,9 @@ func (p *Provider) handleMessagePartDelta(update remotePartDeltaEnvelope) {
 func (p *Provider) handleMessagePartUpdated(update remotePartEnvelope) {
 	sess, ok := p.getSessionByProviderID(update.Part.SessionID)
 	if !ok {
+		return
+	}
+	if sess.isActivePromptMessage(update.Part.MessageID) {
 		return
 	}
 	turnID := sess.canonicalTurnID(update.Part.MessageID)
@@ -1453,7 +1472,26 @@ func (p *Provider) completeTurnFromAssistantMessage(sess *session, turnID string
 	if turnID == "" || sess.statusSnapshot() == contract.SessionIdle {
 		return
 	}
+	if sess.toolActivitySnapshot() {
+		generation := sess.turnGenerationSnapshot()
+		time.AfterFunc(toolCompletionDebounceDelay, func() {
+			p.completeTurnFromAssistantMessageIfCurrent(sess, turnID, generation)
+		})
+		return
+	}
+	p.completeTurnFromAssistantMessageNow(sess, turnID)
+}
+
+func (p *Provider) completeTurnFromAssistantMessageIfCurrent(sess *session, turnID string, generation int64) {
+	if sess.activeTurnIDSnapshot() != turnID || sess.turnGenerationSnapshot() != generation || sess.turnCompleted(turnID) {
+		return
+	}
+	p.completeTurnFromAssistantMessageNow(sess, turnID)
+}
+
+func (p *Provider) completeTurnFromAssistantMessageNow(sess *session, turnID string) {
 	sess.clearActiveTurnID()
+	sess.markTurnCompleted(turnID)
 	sess.setLastError("")
 	sess.setStatus(contract.SessionIdle)
 	sess.clearPendingRequests()
@@ -1470,6 +1508,7 @@ func (p *Provider) handleToolPartUpdated(sess *session, turnID string, part remo
 	if part.State == nil {
 		return
 	}
+	sess.setToolActivity(true)
 	previous, changed := sess.updateToolState(part.ID, part.State.Status)
 	if !changed {
 		return
@@ -1812,6 +1851,7 @@ func (p *Provider) reconcileSessionAfterReconnect(
 		return
 	}
 
+	sess.markTurnCompleted(turnID)
 	sess.setStatus(contract.SessionIdle)
 	p.resolvePendingRequests(sess, "session.status.recovered", "completed")
 	summary := "Recovered OpenCode turn after event stream reconnect"
@@ -1866,6 +1906,7 @@ func newSession(
 		createdAtMS:       createdAt,
 		updatedAtMS:       updatedAt,
 		messageTurns:      make(map[string]string),
+		completedTurns:    make(map[string]struct{}),
 		pendingRequests:   make(map[string]pendingRequest),
 		toolStates:        make(map[string]string),
 		provider:          provider,
@@ -2001,6 +2042,9 @@ func (s *session) setActiveTurnID(value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.activeTurnID = value
+	if strings.TrimSpace(value) != "" {
+		s.turnGeneration++
+	}
 	s.updatedAtMS = time.Now().UnixMilli()
 }
 
@@ -2032,12 +2076,63 @@ func (s *session) canonicalTurnID(messageID string) string {
 	return strings.TrimSpace(messageID)
 }
 
+func (s *session) isActivePromptMessage(messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return strings.TrimSpace(s.activeTurnID) == messageID
+}
+
+func (s *session) markTurnCompleted(turnID string) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completedTurns[turnID] = struct{}{}
+	s.updatedAtMS = time.Now().UnixMilli()
+}
+
+func (s *session) turnCompleted(turnID string) bool {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.completedTurns[turnID]
+	return ok
+}
+
 func (s *session) setAssistantSummary(value string) {
 	trimmed := strings.TrimSpace(value)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastAssistantSummary = truncate(trimmed, 160)
 	s.updatedAtMS = time.Now().UnixMilli()
+}
+
+func (s *session) setToolActivity(value bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.toolActivity = value
+	s.updatedAtMS = time.Now().UnixMilli()
+}
+
+func (s *session) toolActivitySnapshot() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.toolActivity
+}
+
+func (s *session) turnGenerationSnapshot() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.turnGeneration
 }
 
 func (s *session) appendAssistantSummary(value string) {
@@ -2529,6 +2624,19 @@ func coalesce(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func opencodeAgentName(value string) string {
+	switch strings.TrimSpace(value) {
+	case "default_readonly", "readonly", "read_only", "reader", "explorer":
+		return "explore"
+	case "default_reviewer", "reviewer", "review", "builder":
+		return "build"
+	case "review_reporter", "security_reporter", "reporter", "writer":
+		return "build"
+	default:
+		return strings.TrimSpace(value)
+	}
 }
 
 func maxInt64(left, right int64) int64 {

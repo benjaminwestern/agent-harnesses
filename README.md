@@ -49,6 +49,13 @@ and [`hk.pkl`](./hk.pkl) are the source of truth for local automation, and
 [`scripts/`](./scripts) holds only the README asset generator and README
 validator.
 
+Host applications should prefer the Go SDK helpers in `pkg/contract` and
+`pkg/controlplane` over matching event strings or reimplementing session
+adoption locally. The package exposes event constants, request-event and
+terminal-turn helpers, payload extraction, turn accumulation, and
+adopt-or-resume session helpers so applications can stay focused on their own
+workflow model.
+
 The repository has two runtime surfaces:
 
 - `agent_harness` for passive hook, plugin, and extension observation
