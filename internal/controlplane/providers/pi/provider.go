@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/modelcatalog"
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/providerprobe"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
 )
@@ -26,6 +28,7 @@ type Provider struct {
 	mu       sync.RWMutex
 	sessions map[string]*session
 	emit     eventSink
+	probe    *providerprobe.Cache
 }
 
 type session struct {
@@ -83,8 +86,6 @@ type switchSessionResult struct {
 	Cancelled bool `json:"cancelled"`
 }
 
-type promptResponse struct{}
-
 type eventEnvelope struct {
 	Type string `json:"type"`
 }
@@ -135,6 +136,8 @@ func NewProvider(emit func(contract.RuntimeEvent)) *Provider {
 	return &Provider{
 		sessions: make(map[string]*session),
 		emit:     emit,
+		probe: providerprobe.New(piBinaryPath, "--version").
+			WithModels("runtime_default", modelcatalog.Pi()),
 	}
 }
 
@@ -143,7 +146,7 @@ func (p *Provider) Runtime() string {
 }
 
 func (p *Provider) Describe() contract.RuntimeDescriptor {
-	return contract.NewRuntimeDescriptor(
+	descriptor := contract.NewRuntimeDescriptor(
 		runtimeName,
 		contract.OwnershipControlled,
 		contract.TransportRPC,
@@ -163,6 +166,8 @@ func (p *Provider) Describe() contract.RuntimeDescriptor {
 			AdoptExternalSessions:    true,
 		},
 	)
+	descriptor.Probe = p.probe.Snapshot(context.Background())
+	return descriptor
 }
 
 func (p *Provider) StartSession(ctx context.Context, request api.StartSessionRequest) (*contract.RuntimeSession, error) {

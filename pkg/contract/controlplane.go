@@ -121,6 +121,7 @@ type RuntimeDescriptor struct {
 	Ownership     Ownership           `json:"ownership"`
 	Transport     Transport           `json:"transport"`
 	Capabilities  RuntimeCapabilities `json:"capabilities"`
+	Probe         *RuntimeProbe       `json:"probe,omitempty"`
 }
 
 type SystemDescriptor struct {
@@ -128,6 +129,55 @@ type SystemDescriptor struct {
 	WireProtocolVersion string              `json:"wire_protocol_version"`
 	Methods             []string            `json:"methods"`
 	Runtimes            []RuntimeDescriptor `json:"runtimes"`
+}
+
+type AuthProbe struct {
+	Status  string `json:"status,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Label   string `json:"label,omitempty"`
+	Method  string `json:"method,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type RuntimeModelOption struct {
+	Value     string `json:"value"`
+	Label     string `json:"label,omitempty"`
+	IsDefault bool   `json:"is_default,omitempty"`
+}
+
+type RuntimeModelCapabilities struct {
+	ReasoningEffortLevels    []RuntimeModelOption `json:"reasoning_effort_levels,omitempty"`
+	ContextWindowOptions     []RuntimeModelOption `json:"context_window_options,omitempty"`
+	VariantOptions           []RuntimeModelOption `json:"variant_options,omitempty"`
+	AgentOptions             []RuntimeModelOption `json:"agent_options,omitempty"`
+	PromptInjectedEfforts    []string             `json:"prompt_injected_efforts,omitempty"`
+	SupportsFastMode         bool                 `json:"supports_fast_mode,omitempty"`
+	SupportsThinkingToggle   bool                 `json:"supports_thinking_toggle,omitempty"`
+	SupportsThinkingLevel    bool                 `json:"supports_thinking_level,omitempty"`
+	SupportsThinkingBudget   bool                 `json:"supports_thinking_budget,omitempty"`
+	SupportedThinkingLevels  []string             `json:"supported_thinking_levels,omitempty"`
+	SupportedThinkingBudgets []int                `json:"supported_thinking_budgets,omitempty"`
+}
+
+type RuntimeModel struct {
+	ID           string                   `json:"id"`
+	Label        string                   `json:"label,omitempty"`
+	Provider     string                   `json:"provider,omitempty"`
+	Default      bool                     `json:"default,omitempty"`
+	Custom       bool                     `json:"custom,omitempty"`
+	Capabilities RuntimeModelCapabilities `json:"capabilities,omitempty"`
+}
+
+type RuntimeProbe struct {
+	Installed   bool           `json:"installed"`
+	Status      string         `json:"status"`
+	Version     string         `json:"version,omitempty"`
+	BinaryPath  string         `json:"binary_path,omitempty"`
+	Auth        AuthProbe      `json:"auth,omitempty"`
+	Models      []RuntimeModel `json:"models,omitempty"`
+	ModelSource string         `json:"model_source,omitempty"`
+	Message     string         `json:"message,omitempty"`
+	ProbedAtMS  int64          `json:"probed_at_ms,omitempty"`
 }
 
 type SessionState struct {

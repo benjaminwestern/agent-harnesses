@@ -7,15 +7,45 @@ import (
 )
 
 const (
-	EventAssistantMessageDelta = "assistant.message.delta"
-	EventTurnCompleted         = "turn.completed"
-	EventTurnErrored           = "turn.errored"
-	EventSessionErrored        = "session.errored"
-	EventRequestOpened         = "request.opened"
-	EventRequestResponded      = "request.responded"
-	EventRequestResolved       = "request.resolved"
-	EventRequestClosed         = "request.closed"
+	EventAssistantMessageDelta   = "assistant.message.delta"
+	EventAssistantThoughtDelta   = "assistant.thought.delta"
+	EventTurnStarted             = "turn.started"
+	EventTurnCompleted           = "turn.completed"
+	EventTurnErrored             = "turn.errored"
+	EventTurnInterrupted         = "turn.interrupted"
+	EventTurnPlanUpdated         = "turn.plan.updated"
+	EventThreadTokenUsageUpdated = "thread.token-usage.updated"
+	EventToolStarted             = "tool.started"
+	EventToolProgress            = "tool.progress"
+	EventToolCompleted           = "tool.completed"
+	EventToolErrored             = "tool.errored"
+	EventSessionStarted          = "session.started"
+	EventSessionStopped          = "session.stopped"
+	EventSessionErrored          = "session.errored"
+	EventSessionModeChanged      = "session.mode.changed"
+	EventRequestOpened           = "request.opened"
+	EventRequestResponded        = "request.responded"
+	EventRequestResolved         = "request.resolved"
+	EventRequestClosed           = "request.closed"
+	EventRuntimeEvent            = "runtime.event"
+	EventRuntimeDecodeError      = "runtime.decode_error"
+	EventRuntimeStderr           = "runtime.stderr"
 )
+
+type TokenUsage struct {
+	InputTokens     int64 `json:"input_tokens,omitempty"`
+	OutputTokens    int64 `json:"output_tokens,omitempty"`
+	ReasoningTokens int64 `json:"reasoning_tokens,omitempty"`
+	CachedTokens    int64 `json:"cached_tokens,omitempty"`
+	TotalTokens     int64 `json:"total_tokens,omitempty"`
+}
+
+type PlanStep struct {
+	ID      string `json:"id,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Details string `json:"details,omitempty"`
+}
 
 func IsRequestEvent(event RuntimeEvent) bool {
 	return event.Request != nil || strings.TrimSpace(event.RequestID) != ""

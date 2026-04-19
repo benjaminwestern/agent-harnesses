@@ -8,11 +8,12 @@ import (
 )
 
 type StartSessionRequest struct {
-	SessionID string
-	CWD       string
-	Model     string
-	Prompt    string
-	Metadata  map[string]any
+	SessionID    string
+	CWD          string
+	Model        string
+	ModelOptions ModelOptions
+	Prompt       string
+	Metadata     map[string]any
 }
 
 type ResumeSessionRequest struct {
@@ -20,7 +21,16 @@ type ResumeSessionRequest struct {
 	ProviderSessionID string
 	CWD               string
 	Model             string
+	ModelOptions      ModelOptions
 	Metadata          map[string]any
+}
+
+// ModelOptions carries provider model controls that need to cross the generic
+// control-plane API. Providers ignore fields they do not understand.
+type ModelOptions struct {
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	ThinkingLevel   string `json:"thinking_level,omitempty"`
+	ThinkingBudget  *int   `json:"thinking_budget,omitempty"`
 }
 
 type SendInputRequest struct {

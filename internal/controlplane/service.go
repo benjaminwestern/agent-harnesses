@@ -18,6 +18,9 @@ type Service struct {
 	sessionRuntime map[string]string
 	directory      *SessionDirectory
 	events         *EventBus
+	operationLocks map[string]*sync.Mutex
+	locksMu        sync.Mutex
+	eventLogger    *EventLogger
 }
 
 func NewService(providers ...api.Provider) *Service {
@@ -26,6 +29,10 @@ func NewService(providers ...api.Provider) *Service {
 		sessionRuntime: make(map[string]string),
 		directory:      NewSessionDirectory(),
 		events:         NewEventBus(),
+		operationLocks: make(map[string]*sync.Mutex),
+	}
+	if logger, err := NewEventLoggerFromEnv(); err == nil {
+		service.eventLogger = logger
 	}
 	for _, provider := range providers {
 		service.providers[provider.Runtime()] = provider
@@ -34,6 +41,9 @@ func NewService(providers ...api.Provider) *Service {
 }
 
 func (s *Service) PublishEvent(event contract.RuntimeEvent) {
+	if s.eventLogger != nil {
+		_ = s.eventLogger.Write(event)
+	}
 	s.directory.UpdateFromEvent(event)
 	if event.EventType == "session.stopped" || event.EventType == "session.errored" {
 		s.mu.Lock()
@@ -99,7 +109,12 @@ func (s *Service) StartSession(
 		request.SessionID = newIdentifier("session")
 	}
 
-	session, err := provider.StartSession(ctx, request)
+	var session *contract.RuntimeSession
+	err = s.withSessionLock(request.SessionID, func() error {
+		var err error
+		session, err = provider.StartSession(ctx, request)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +135,12 @@ func (s *Service) ResumeSession(
 		request.SessionID = newIdentifier("session")
 	}
 
-	session, err := provider.ResumeSession(ctx, request)
+	var session *contract.RuntimeSession
+	err = s.withSessionLock(request.SessionID, func() error {
+		var err error
+		session, err = provider.ResumeSession(ctx, request)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +156,13 @@ func (s *Service) SendInput(
 	if err != nil {
 		return nil, err
 	}
-	return provider.SendInput(ctx, request)
+	var event *contract.RuntimeEvent
+	err = s.withSessionLock(request.SessionID, func() error {
+		var err error
+		event, err = provider.SendInput(ctx, request)
+		return err
+	})
+	return event, err
 }
 
 func (s *Service) Interrupt(
@@ -147,7 +173,13 @@ func (s *Service) Interrupt(
 	if err != nil {
 		return nil, err
 	}
-	return provider.Interrupt(ctx, sessionID)
+	var event *contract.RuntimeEvent
+	err = s.withSessionLock(sessionID, func() error {
+		var err error
+		event, err = provider.Interrupt(ctx, sessionID)
+		return err
+	})
+	return event, err
 }
 
 func (s *Service) Respond(
@@ -162,7 +194,13 @@ func (s *Service) Respond(
 	if err != nil {
 		return nil, err
 	}
-	return provider.Respond(ctx, request)
+	var event *contract.RuntimeEvent
+	err = s.withSessionLock(request.SessionID, func() error {
+		var err error
+		event, err = provider.Respond(ctx, request)
+		return err
+	})
+	return event, err
 }
 
 func (s *Service) StopSession(
@@ -173,7 +211,13 @@ func (s *Service) StopSession(
 	if err != nil {
 		return nil, err
 	}
-	return provider.StopSession(ctx, sessionID)
+	var event *contract.RuntimeEvent
+	err = s.withSessionLock(sessionID, func() error {
+		var err error
+		event, err = provider.StopSession(ctx, sessionID)
+		return err
+	})
+	return event, err
 }
 
 func (s *Service) ListSessions(
@@ -259,6 +303,24 @@ func (s *Service) refreshRuntime(runtime string, sessions []contract.RuntimeSess
 		s.sessionRuntime[session.SessionID] = runtime
 		s.directory.Upsert(session)
 	}
+}
+
+func (s *Service) withSessionLock(sessionID string, fn func() error) error {
+	if sessionID == "" {
+		return fn()
+	}
+
+	s.locksMu.Lock()
+	lock, ok := s.operationLocks[sessionID]
+	if !ok {
+		lock = &sync.Mutex{}
+		s.operationLocks[sessionID] = lock
+	}
+	s.locksMu.Unlock()
+
+	lock.Lock()
+	defer lock.Unlock()
+	return fn()
 }
 
 func newIdentifier(prefix string) string {

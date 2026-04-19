@@ -318,7 +318,9 @@ func startDebugListener(socketPath string, stdout io.Writer) (func(), error) {
 				return
 			}
 			go func() {
-				defer conn.Close()
+				defer func() {
+					_ = conn.Close()
+				}()
 				scanner := bufio.NewScanner(conn)
 				for scanner.Scan() {
 					text := strings.TrimSpace(scanner.Text())

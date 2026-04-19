@@ -10,8 +10,8 @@ Official references:
 
 - [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
 
-This bundle was validated on April 5, 2026 against
-`2.1.84 (Claude Code)`, as reported by `claude --version` on the validation
+This bundle was validated on April 19, 2026 against
+`2.1.98 (Claude Code)`, as reported by `claude --version` on the validation
 machine.
 
 ## Install Claude Code
@@ -96,7 +96,7 @@ for app-managed sessions. New Claude sessions also get a controller-assigned
 UUID at `session.start`, so `provider_session_id` is available immediately
 instead of appearing only after the first turn begins.
 
-This bridge path was validated on April 5, 2026 against `claude 2.1.84` and
+This bridge path was validated on April 19, 2026 against `claude 2.1.98` and
 `@anthropic-ai/claude-agent-sdk 0.2.92`. The validation covered:
 
 - a real SDK-backed turn start and streamed result

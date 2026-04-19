@@ -53,7 +53,9 @@ func serve(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ExitOnError)
 	flags.SetOutput(os.Stdout)
 	socketPath := flags.String("socket-path", filepath.Join(os.TempDir(), "agentic-control.sock"), "Unix socket path")
-	flags.Parse(args)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -78,7 +80,9 @@ func describe(args []string) error {
 	flags := flag.NewFlagSet("describe", flag.ExitOnError)
 	flags.SetOutput(os.Stdout)
 	socketPath := flags.String("socket-path", filepath.Join(os.TempDir(), "agentic-control.sock"), "Unix socket path")
-	flags.Parse(args)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
 
 	connection, err := net.Dial("unix", *socketPath)
 	if err != nil {
@@ -87,7 +91,9 @@ func describe(args []string) error {
 		}
 		return err
 	}
-	defer connection.Close()
+	defer func() {
+		_ = connection.Close()
+	}()
 
 	request := map[string]any{
 		"id":     "describe-1",
@@ -121,7 +127,7 @@ func describe(args []string) error {
 }
 
 func usage() {
-	fmt.Fprint(os.Stdout,
+	_, _ = fmt.Fprint(os.Stdout,
 		"Usage:\n"+
 			"  agent_control serve [--socket-path <path>]\n"+
 			"  agent_control describe [--socket-path <path>]\n\n"+

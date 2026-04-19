@@ -36,7 +36,7 @@ func (s *RPCServer) ServeUnix(ctx context.Context, socketPath string) error {
 		return err
 	}
 	defer func() {
-		listener.Close()
+		_ = listener.Close()
 		_ = os.Remove(socketPath)
 	}()
 
@@ -80,21 +80,23 @@ type rpcNotification struct {
 }
 
 type startSessionParams struct {
-	Runtime   string         `json:"runtime"`
-	SessionID string         `json:"session_id,omitempty"`
-	CWD       string         `json:"cwd,omitempty"`
-	Model     string         `json:"model,omitempty"`
-	Prompt    string         `json:"prompt,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	Runtime      string           `json:"runtime"`
+	SessionID    string           `json:"session_id,omitempty"`
+	CWD          string           `json:"cwd,omitempty"`
+	Model        string           `json:"model,omitempty"`
+	ModelOptions api.ModelOptions `json:"model_options,omitempty"`
+	Prompt       string           `json:"prompt,omitempty"`
+	Metadata     map[string]any   `json:"metadata,omitempty"`
 }
 
 type resumeSessionParams struct {
-	Runtime           string         `json:"runtime"`
-	SessionID         string         `json:"session_id,omitempty"`
-	ProviderSessionID string         `json:"provider_session_id"`
-	CWD               string         `json:"cwd,omitempty"`
-	Model             string         `json:"model,omitempty"`
-	Metadata          map[string]any `json:"metadata,omitempty"`
+	Runtime           string           `json:"runtime"`
+	SessionID         string           `json:"session_id,omitempty"`
+	ProviderSessionID string           `json:"provider_session_id"`
+	CWD               string           `json:"cwd,omitempty"`
+	Model             string           `json:"model,omitempty"`
+	ModelOptions      api.ModelOptions `json:"model_options,omitempty"`
+	Metadata          map[string]any   `json:"metadata,omitempty"`
 }
 
 type sendInputParams struct {
@@ -126,7 +128,9 @@ type stopSessionParams struct {
 }
 
 func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
-	defer connection.Close()
+	defer func() {
+		_ = connection.Close()
+	}()
 
 	writer := &lockedWriter{writer: connection}
 	events, unsubscribe := s.service.SubscribeEvents(256)
@@ -200,11 +204,12 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				continue
 			}
 			result, err := s.service.StartSession(ctx, params.Runtime, api.StartSessionRequest{
-				SessionID: params.SessionID,
-				CWD:       params.CWD,
-				Model:     params.Model,
-				Prompt:    params.Prompt,
-				Metadata:  params.Metadata,
+				SessionID:    params.SessionID,
+				CWD:          params.CWD,
+				Model:        params.Model,
+				ModelOptions: params.ModelOptions,
+				Prompt:       params.Prompt,
+				Metadata:     params.Metadata,
 			})
 			if err != nil {
 				_ = writer.writeJSON(errorResponse(request.ID, err))
@@ -222,6 +227,7 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				ProviderSessionID: params.ProviderSessionID,
 				CWD:               params.CWD,
 				Model:             params.Model,
+				ModelOptions:      params.ModelOptions,
 				Metadata:          params.Metadata,
 			})
 			if err != nil {

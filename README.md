@@ -183,15 +183,15 @@ matching uninstall command:
 ```
 
 The hook bundles and live scenarios in this repository were validated on April
-5, 2026 against these installed CLI versions:
+19, 2026 against these installed CLI versions:
 
 | Runtime | Validated version | Install guide | Native reference |
 | --- | --- | --- | --- |
-| Codex | `codex-cli 0.118.0` | [Codex CLI quickstart and install](https://github.com/openai/codex#quickstart) | [Codex hooks](https://developers.openai.com/codex/hooks) |
-| Gemini | `0.36.0` | [Gemini CLI installation](https://geminicli.com/docs/get-started/installation/) | [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/) |
-| Claude | `2.1.84 (Claude Code)` | [Claude Code setup](https://docs.claude.com/en/docs/claude-code/setup) | [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) |
-| OpenCode | `1.3.15` | [OpenCode install guide](https://opencode.ai/docs/) | [OpenCode plugins](https://opencode.ai/docs/plugins/) |
-| pi | `0.66.1` | [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) | [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md) |
+| Codex | `codex-cli 0.121.0` | [Codex CLI quickstart and install](https://github.com/openai/codex#quickstart) | [Codex hooks](https://developers.openai.com/codex/hooks) |
+| Gemini | `0.38.2` | [Gemini CLI installation](https://geminicli.com/docs/get-started/installation/) | [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/) |
+| Claude | `2.1.98 (Claude Code)` | [Claude Code setup](https://docs.claude.com/en/docs/claude-code/setup) | [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) |
+| OpenCode | `1.14.17` | [OpenCode install guide](https://opencode.ai/docs/) | [OpenCode plugins](https://opencode.ai/docs/plugins/) |
+| pi | `0.67.68` | [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) | [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md) |
 
 If you are running different versions, rerun the fixture replay and live
 diagnostic tasks before assuming the same hook payloads or launch behaviour.
@@ -420,7 +420,7 @@ The repository is split into a small number of clear modules:
 
 | Path | Purpose |
 | --- | --- |
-| [`cmd/`](./cmd) | Binary entrypoints for the shared helper and future control-plane tools. |
+| [`cmd/`](./cmd) | Binary entrypoints for the shared helper and control-plane tools. |
 | [`internal/harness/`](./internal/harness) | Shared hook, plugin, and extension translation logic. |
 | [`internal/controlplane/`](./internal/controlplane) | Active-session registry, event bus, server, and provider implementations. |
 | [`pkg/contract/`](./pkg/contract) | Shared Go contract types for harness and control-plane work. |

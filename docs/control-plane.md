@@ -60,11 +60,36 @@ Each runtime descriptor includes:
 - `ownership`
 - `transport`
 - `capabilities`
+- `probe`
 
 The capability object makes controller defaults explicit. Clients don't need to
 guess whether a runtime supports `resume`, `respond`, or immediate provider
 session IDs. This is the main convention-over-configuration entrypoint for new
 integrations, including HTTP-backed wrappers such as OpenCode server.
+
+The optional `probe` object is a cached runtime health check. The controller
+checks the configured binary path, captures a version string when the runtime
+supports `--version`, and caches the result for five minutes. Probe states are
+advisory: `capabilities` describes what the provider implementation supports,
+while `probe` describes the current local machine.
+
+Probe fields are designed for upstream UX. A host can render one install and
+model picker from:
+
+- `installed`, `status`, `version`, and `binary_path` for local install state
+- `auth.status`, `auth.type`, `auth.label`, `auth.method`, and `auth.message`
+  for authentication state
+- `models[]` and `model_source` for the models that the runtime can expose
+  today
+
+Static providers such as Codex, Claude, and Gemini publish a built-in model
+catalog with per-model capabilities. OpenCode enriches its probe from the
+running `opencode serve` `/provider` endpoint when available, so upstream apps
+can show connected OpenAI, Anthropic, Google, or other provider models without
+hard-coding that inventory. pi is the exception: it has a native model registry
+and `pi --list-models`, but no documented stable JSON/RPC inventory contract,
+so the control-plane currently reports pi install/version state with
+`model_source: "runtime_default"` and no model list.
 
 Example request:
 
@@ -114,11 +139,72 @@ Example response shape:
         "immediate_provider_session": true,
         "resume_by_provider_id": true,
         "adopt_external_sessions": false
+      },
+      "probe": {
+        "installed": true,
+        "status": "ready",
+        "version": "codex-cli 0.121.0",
+        "binary_path": "/opt/homebrew/bin/codex",
+        "auth": {
+          "status": "authenticated",
+          "method": "login status"
+        },
+        "model_source": "built_in",
+        "models": [
+          {
+            "id": "gpt-5.4",
+            "label": "GPT-5.4",
+            "provider": "codex",
+            "default": true,
+            "capabilities": {
+              "reasoning_effort_levels": [
+                {"value": "xhigh", "label": "Extra High"},
+                {"value": "high", "label": "High", "is_default": true},
+                {"value": "medium", "label": "Medium"},
+                {"value": "low", "label": "Low"}
+              ],
+              "supports_fast_mode": true
+            }
+          }
+        ],
+        "message": "Runtime binary found",
+        "probed_at_ms": 1775200000000
       }
     }
   ]
 }
 ```
+
+## Text generation router
+
+The public Go package also exposes a small unified text-generation router in
+[`pkg/controlplane/textgen.go`](../pkg/controlplane/textgen.go). Upstream
+services can use it for the shared text-generation surfaces:
+
+- commit messages
+- pull-request content
+- branch names
+- thread titles
+
+Callers pass a `TextGenerationModelSelection` with optional `provider`,
+`model`, `model_options`, and `fallbacks`. The router resolves in this order:
+
+1. explicit provider
+2. provider inferred from the model ID
+3. fallback providers
+4. router default provider
+
+Model inference keeps common upstream rules centralised:
+
+- `claude-*` routes to Claude
+- `gemini-*` and `auto-gemini-*` route to Gemini
+- `gpt-*` and OpenAI reasoning model prefixes route to Codex
+- provider-scoped model IDs such as `anthropic/claude-sonnet-4-6` route to
+  OpenCode
+
+The resolved selection is passed into the selected provider, so upstream
+services can keep their own role or worker configuration simple while still
+preserving the chosen model and model options.
 
 ## Start the server
 
@@ -173,7 +259,31 @@ Example request:
   "params": {
     "runtime": "codex",
     "session_id": "voice-codex-1",
-    "cwd": "/Users/benjaminwestern/code/personal/agentic-control"
+    "cwd": "/Users/benjaminwestern/code/personal/agentic-control",
+    "model": "gpt-5.4",
+    "model_options": {
+      "reasoning_effort": "high"
+    }
+  }
+}
+```
+
+`model_options` is intentionally generic. Providers ignore unsupported fields.
+Gemini uses `thinking_level` for Gemini 3 models and `thinking_budget` for
+Gemini 2.5 models. For example:
+
+```json
+{
+  "id": "start-gemini-1",
+  "method": "session.start",
+  "params": {
+    "runtime": "gemini",
+    "session_id": "gemini-research-1",
+    "cwd": "/workspace/repo",
+    "model": "gemini-2.5-pro",
+    "model_options": {
+      "thinking_budget": -1
+    }
   }
 }
 ```
@@ -223,6 +333,38 @@ This keeps app code simple while avoiding unsafe implicit approvals.
 
 Runtime events also include `session_state`, which gives you a typed session
 status snapshot without scraping `payload.status` out of event-specific data.
+
+Richer controller events are emitted when the runtime exposes enough detail:
+
+- `assistant.message.delta`
+- `assistant.thought.delta`
+- `thread.token-usage.updated`
+- `turn.plan.updated`
+- `tool.progress`
+- `session.mode.changed`
+
+## Event Logging
+
+Set `AGENTIC_CONTROL_EVENT_LOG` to append every control-plane event to an
+NDJSON file:
+
+```bash
+AGENTIC_CONTROL_EVENT_LOG=/tmp/agentic-control/events.ndjson \
+  .artifacts/bin/agent_control serve --socket-path /tmp/agentic-control.sock
+```
+
+Each line includes a UTC timestamp, runtime, session ID, and the full
+normalised event. This is intended for local debugging, ACP protocol
+investigation, and lightweight analytics capture.
+
+## Text Generation Router
+
+Host applications that use agentic-control for repository workflows can use the
+Go text generation router in `pkg/controlplane`. It defines one provider
+interface for commit messages, PR content, branch names, and thread titles, and
+routes by provider name with a configured default fallback. This keeps
+provider-specific prompting out of application workflow code while preserving
+the app's choice of provider.
 
 ## Runtime notes
 
@@ -292,7 +434,7 @@ The remaining Gemini parity steps are:
 - add real integration coverage against the released ACP build
 
 Gemini session discovery is controller-owned. The Gemini ACP
-surface in `gemini 0.36.0` supports `session/new`, `session/load`,
+surface in `gemini 0.38.2` supports `session/new`, `session/load`,
 `session/prompt`, `session/cancel`, and `session/request_permission`, but it
 does not expose `session/list`, so the Go service treats its own active
 session registry as the authoritative live-session view. `system.describe`
@@ -318,7 +460,7 @@ the SDK `canUseTool` boundary instead of the CLI `stream-json` input format.
 New Claude sessions also get a controller-assigned UUID at `session.start`, so
 the provider session ID is available before the first user turn is sent.
 
-This bridge path was validated on April 5, 2026 against `claude 2.1.84` and
+This bridge path was validated on April 19, 2026 against `claude 2.1.98` and
 `@anthropic-ai/claude-agent-sdk 0.2.92` with:
 
 - a real SDK-backed turn start and streamed result

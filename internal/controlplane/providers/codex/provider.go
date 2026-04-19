@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/modelcatalog"
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/providerprobe"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
 )
@@ -27,6 +29,7 @@ type Provider struct {
 	mu       sync.RWMutex
 	sessions map[string]*session
 	emit     eventSink
+	probe    *providerprobe.Cache
 }
 
 type session struct {
@@ -73,6 +76,9 @@ func NewProvider(emit func(contract.RuntimeEvent)) *Provider {
 	return &Provider{
 		sessions: make(map[string]*session),
 		emit:     emit,
+		probe: providerprobe.New(codexBinaryPath, "--version").
+			WithAuthCommand("login", "status").
+			WithModels("built_in", modelcatalog.Codex()),
 	}
 }
 
@@ -81,7 +87,7 @@ func (p *Provider) Runtime() string {
 }
 
 func (p *Provider) Describe() contract.RuntimeDescriptor {
-	return contract.NewRuntimeDescriptor(
+	descriptor := contract.NewRuntimeDescriptor(
 		runtimeName,
 		contract.OwnershipControlled,
 		contract.TransportAppServer,
@@ -100,6 +106,8 @@ func (p *Provider) Describe() contract.RuntimeDescriptor {
 			ResumeByProviderID:       true,
 		},
 	)
+	descriptor.Probe = p.probe.Snapshot(context.Background())
+	return descriptor
 }
 
 func (p *Provider) StartSession(

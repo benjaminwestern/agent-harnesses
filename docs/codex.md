@@ -13,8 +13,8 @@ Official references:
 - [Codex plugin packaging](https://developers.openai.com/codex/plugins/build)
 - [OpenAI Codex repository](https://github.com/openai/codex)
 
-This bundle was validated on April 5, 2026 against
-`codex-cli 0.118.0`, as reported by `codex --version` on the validation
+This bundle was validated on April 19, 2026 against
+`codex-cli 0.121.0`, as reported by `codex --version` on the validation
 machine.
 
 ## Install Codex CLI

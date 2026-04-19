@@ -10,7 +10,7 @@ Official references:
 - [Gemini CLI hooks guide](https://geminicli.com/docs/hooks/)
 - [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/)
 
-This bundle was validated on April 5, 2026 against `gemini 0.36.0`,
+This bundle was validated on April 19, 2026 against `gemini 0.38.2`,
 as reported by `gemini --version` on the validation machine.
 
 ## Install Gemini CLI
@@ -86,10 +86,35 @@ The Gemini ACP adapter uses the native ACP methods exposed by the CLI:
 - `session/cancel`
 - `session/request_permission`
 
+Gemini thinking controls are configured through control-plane
+`model_options`. Gemini CLI does not expose a per-prompt thinking knob, so the
+provider creates a temporary `GEMINI_CLI_SYSTEM_SETTINGS_PATH` file with model
+aliases before it starts `gemini --acp`.
+
+Supported Gemini model options are:
+
+- `thinking_level: "LOW" | "HIGH"` for Gemini 3 models
+- `thinking_budget: -1 | 0 | 512` for Gemini 2.5 models
+
+When an option applies, the provider sends Gemini the generated alias but keeps
+the public session `model` set to the requested model ID.
+
+`system.describe` exposes the same information for UI discovery. Gemini's
+probe includes a built-in Gemini model catalog with the supported thinking
+levels or budgets for each model family, while the provider still creates the
+runtime alias lazily only for sessions that request a thinking option.
+
 The Gemini CLI ACP surface does not expose `session/list`, so the
 controller uses its own active-session registry for live session targeting.
 That means ACP is the right boundary for sessions your app launches or resumes,
 while hooks remain the right boundary for unmanaged external Gemini sessions.
+
+Completed Gemini ACP turns attempt to snapshot the native Gemini session file
+under `~/.gemini/tmp/*/chats`. The `turn.completed` payload includes
+`snapshot_session_id` and `snapshot_file_path` when a clone is available, and
+the session metadata keeps a bounded list of recent snapshots. Host
+applications can resume from a snapshot by passing the snapshot session ID as
+`provider_session_id` to `session.resume`.
 
 ## Controller parity
 

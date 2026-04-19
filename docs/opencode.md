@@ -21,7 +21,7 @@ Official references:
 - [OpenCode server](https://opencode.ai/docs/server/)
 - [OpenCode repository](https://github.com/anomalyco/opencode)
 
-This bundle was validated on April 5, 2026 against `1.3.15`, as
+This bundle was validated on April 19, 2026 against `1.14.17`, as
 reported by `opencode --version` on the validation machine.
 
 ## Install OpenCode

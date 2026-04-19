@@ -13,11 +13,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/providerprobe"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
 )
@@ -26,6 +28,7 @@ const (
 	runtimeName                 = "opencode"
 	loopbackHost                = "127.0.0.1"
 	toolCompletionDebounceDelay = 1500 * time.Millisecond
+	inventoryProbeTTL           = 5 * time.Minute
 )
 
 type eventSink func(contract.RuntimeEvent)
@@ -38,6 +41,10 @@ type Provider struct {
 	providerSessions map[string]*session
 	server           *serverProcess
 	emit             eventSink
+	probe            *providerprobe.Cache
+	inventoryMu      sync.Mutex
+	inventory        remoteProviderInventory
+	inventoryExpires time.Time
 }
 
 type session struct {
@@ -124,6 +131,25 @@ type remoteSessionErrorEnvelope struct {
 type remoteProviderError struct {
 	Name string         `json:"name"`
 	Data map[string]any `json:"data"`
+}
+
+type remoteProviderInventory struct {
+	All       []remoteProviderCatalog `json:"all"`
+	Connected []string                `json:"connected"`
+}
+
+type remoteProviderCatalog struct {
+	ID     string                        `json:"id"`
+	Name   string                        `json:"name"`
+	Models map[string]remoteModelCatalog `json:"models"`
+}
+
+type remoteModelCatalog struct {
+	ID           string         `json:"id"`
+	ProviderID   string         `json:"providerID"`
+	Name         string         `json:"name"`
+	Variants     map[string]any `json:"variants"`
+	Capabilities map[string]any `json:"capabilities"`
 }
 
 type remotePermission struct {
@@ -249,6 +275,7 @@ func NewProvider(emit func(contract.RuntimeEvent)) *Provider {
 		sessions:         make(map[string]*session),
 		providerSessions: make(map[string]*session),
 		emit:             emit,
+		probe:            providerprobe.New(opencodeBinaryPath, "--version"),
 	}
 }
 
@@ -257,7 +284,7 @@ func (p *Provider) Runtime() string {
 }
 
 func (p *Provider) Describe() contract.RuntimeDescriptor {
-	return contract.NewRuntimeDescriptor(
+	descriptor := contract.NewRuntimeDescriptor(
 		runtimeName,
 		contract.OwnershipControlled,
 		contract.TransportHTTPServer,
@@ -277,6 +304,154 @@ func (p *Provider) Describe() contract.RuntimeDescriptor {
 			AdoptExternalSessions:    true,
 		},
 	)
+	descriptor.Probe = p.probe.Snapshot(context.Background())
+	p.enrichProbeWithInventory(context.Background(), descriptor.Probe)
+	return descriptor
+}
+
+func (p *Provider) enrichProbeWithInventory(ctx context.Context, probe *contract.RuntimeProbe) {
+	if probe == nil {
+		return
+	}
+
+	p.mu.RLock()
+	server := p.server
+	p.mu.RUnlock()
+	var inventory remoteProviderInventory
+	if server == nil {
+		var ok bool
+		inventory, ok = p.cachedInventory()
+		if !ok {
+			var err error
+			inventory, err = probeStandaloneOpenCodeInventory(ctx)
+			if err != nil {
+				if probe.ModelSource == "" {
+					probe.ModelSource = "dynamic_error"
+				}
+				if probe.Status == "ready" {
+					probe.Status = "warning"
+				}
+				probe.Message = appendProbeMessage(probe.Message, fmt.Sprintf("OpenCode model inventory unavailable: %s", err))
+				return
+			}
+			p.storeInventory(inventory)
+		}
+	} else {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+
+		if err := server.doJSON(ctx, http.MethodGet, "/provider", "", nil, &inventory); err != nil {
+			if probe.ModelSource == "" {
+				probe.ModelSource = "dynamic_error"
+			}
+			if probe.Status == "ready" {
+				probe.Status = "warning"
+			}
+			probe.Message = appendProbeMessage(probe.Message, fmt.Sprintf("OpenCode model inventory unavailable: %s", err))
+			return
+		}
+		p.storeInventory(inventory)
+	}
+
+	models := runtimeModelsFromOpenCodeInventory(inventory)
+	probe.Models = models
+	probe.ModelSource = "opencode_provider_endpoint"
+	if len(inventory.Connected) > 0 {
+		probe.Auth = contract.AuthProbe{
+			Status:  "authenticated",
+			Type:    "provider",
+			Label:   strings.Join(inventory.Connected, ", "),
+			Method:  "GET /provider",
+			Message: fmt.Sprintf("%d connected OpenCode provider(s)", len(inventory.Connected)),
+		}
+		if probe.Status != "missing" {
+			probe.Status = "ready"
+		}
+		probe.Message = fmt.Sprintf("Found %d connected OpenCode provider(s) and %d model(s).", len(inventory.Connected), len(models))
+		return
+	}
+
+	probe.Auth = contract.AuthProbe{
+		Status:  "unauthenticated",
+		Type:    "provider",
+		Method:  "GET /provider",
+		Message: "OpenCode has no connected providers.",
+	}
+	if probe.Status == "ready" {
+		probe.Status = "warning"
+	}
+	probe.Message = "OpenCode has no connected providers."
+}
+
+func (p *Provider) cachedInventory() (remoteProviderInventory, bool) {
+	p.inventoryMu.Lock()
+	defer p.inventoryMu.Unlock()
+	if time.Now().After(p.inventoryExpires) {
+		return remoteProviderInventory{}, false
+	}
+	return p.inventory, true
+}
+
+func (p *Provider) storeInventory(inventory remoteProviderInventory) {
+	p.inventoryMu.Lock()
+	defer p.inventoryMu.Unlock()
+	p.inventory = inventory
+	p.inventoryExpires = time.Now().Add(inventoryProbeTTL)
+}
+
+func probeStandaloneOpenCodeInventory(ctx context.Context) (remoteProviderInventory, error) {
+	var inventory remoteProviderInventory
+	port, err := reservePort()
+	if err != nil {
+		return inventory, err
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	command := exec.CommandContext(
+		ctx,
+		opencodeBinaryPath(),
+		"serve",
+		"--hostname",
+		loopbackHost,
+		"--port",
+		strconv.Itoa(port),
+		"--pure",
+	)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return inventory, err
+	}
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		return inventory, err
+	}
+	if err := command.Start(); err != nil {
+		return inventory, err
+	}
+	go discardReader(stdout)
+	go discardReader(stderr)
+
+	server := &serverProcess{
+		ctx:     ctx,
+		cancel:  cancel,
+		cmd:     command,
+		baseURL: fmt.Sprintf("http://%s:%d", loopbackHost, port),
+		client:  &http.Client{Timeout: 3 * time.Second},
+	}
+	defer func() {
+		cancel()
+		_ = command.Wait()
+	}()
+
+	if err := server.waitForHealth(ctx); err != nil {
+		return inventory, err
+	}
+	if err := server.doJSON(ctx, http.MethodGet, "/provider", "", nil, &inventory); err != nil {
+		return inventory, err
+	}
+	return inventory, nil
 }
 
 func (p *Provider) StartSession(
@@ -847,7 +1022,7 @@ func (s *serverProcess) waitForHealth(ctx context.Context) error {
 		response, err := s.client.Do(request)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, response.Body)
-			response.Body.Close()
+			_ = response.Body.Close()
 			if response.StatusCode == http.StatusOK {
 				return nil
 			}
@@ -894,7 +1069,9 @@ func (s *serverProcess) doJSON(
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		bodyBytes, _ := io.ReadAll(response.Body)
@@ -931,7 +1108,9 @@ func (s *serverProcess) readEventsOnce() error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(response.Body)
 		message := strings.TrimSpace(string(body))
@@ -1532,7 +1711,7 @@ func (p *Provider) handleToolPartUpdated(sess *session, turnID string, part remo
 		payload["error"] = part.State.Error
 	}
 
-	summary := fmt.Sprintf("OpenCode tool %s", coalesce(part.Tool, "activity"))
+	summary := ""
 	eventType := "runtime.event"
 	switch part.State.Status {
 	case "pending":
@@ -2575,7 +2754,9 @@ func reservePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer listener.Close()
+	defer func() {
+		_ = listener.Close()
+	}()
 	address, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {
 		return 0, errors.New("failed to resolve TCP port")
@@ -2601,9 +2782,9 @@ func valueAsString(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return typed
-	case fmt.Stringer:
-		return typed.String()
 	case json.Number:
+		return typed.String()
+	case fmt.Stringer:
 		return typed.String()
 	default:
 		return ""
@@ -2624,6 +2805,135 @@ func coalesce(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func runtimeModelsFromOpenCodeInventory(inventory remoteProviderInventory) []contract.RuntimeModel {
+	connected := make(map[string]struct{}, len(inventory.Connected))
+	for _, providerID := range inventory.Connected {
+		providerID = strings.TrimSpace(providerID)
+		if providerID != "" {
+			connected[providerID] = struct{}{}
+		}
+	}
+
+	models := make([]contract.RuntimeModel, 0)
+	for _, provider := range inventory.All {
+		providerID := strings.TrimSpace(provider.ID)
+		if len(connected) > 0 {
+			if _, ok := connected[providerID]; !ok {
+				continue
+			}
+		}
+		for key, model := range provider.Models {
+			modelID := coalesce(strings.TrimSpace(model.ID), strings.TrimSpace(key))
+			if modelID == "" {
+				continue
+			}
+			modelProviderID := coalesce(strings.TrimSpace(model.ProviderID), providerID)
+			models = append(models, contract.RuntimeModel{
+				ID:       qualifiedOpenCodeModelID(modelProviderID, modelID),
+				Label:    openCodeModelLabel(provider, model, modelID),
+				Provider: modelProviderID,
+				Capabilities: contract.RuntimeModelCapabilities{
+					VariantOptions: openCodeVariantOptions(modelProviderID, model.Variants),
+				},
+			})
+		}
+	}
+
+	sort.Slice(models, func(i, j int) bool {
+		if models[i].Provider == models[j].Provider {
+			return models[i].ID < models[j].ID
+		}
+		return models[i].Provider < models[j].Provider
+	})
+	return models
+}
+
+func qualifiedOpenCodeModelID(providerID string, modelID string) string {
+	if providerID == "" {
+		return modelID
+	}
+	if strings.HasPrefix(modelID, providerID+"/") {
+		return modelID
+	}
+	return providerID + "/" + modelID
+}
+
+func openCodeModelLabel(provider remoteProviderCatalog, model remoteModelCatalog, modelID string) string {
+	modelName := coalesce(strings.TrimSpace(model.Name), modelID)
+	providerName := strings.TrimSpace(provider.Name)
+	if providerName == "" {
+		return modelName
+	}
+	return providerName + " - " + modelName
+}
+
+func openCodeVariantOptions(providerID string, variants map[string]any) []contract.RuntimeModelOption {
+	if len(variants) == 0 {
+		return nil
+	}
+
+	values := make([]string, 0, len(variants))
+	for variant := range variants {
+		if variant = strings.TrimSpace(variant); variant != "" {
+			values = append(values, variant)
+		}
+	}
+	sort.Strings(values)
+
+	defaultVariant := defaultOpenCodeVariant(providerID, values)
+	options := make([]contract.RuntimeModelOption, 0, len(values))
+	for _, value := range values {
+		options = append(options, contract.RuntimeModelOption{
+			Value:     value,
+			Label:     value,
+			IsDefault: value == defaultVariant,
+		})
+	}
+	return options
+}
+
+func defaultOpenCodeVariant(providerID string, values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	if len(values) == 1 {
+		return values[0]
+	}
+	switch {
+	case strings.Contains(providerID, "anthropic"):
+		return firstMatchingVariant(values, "high", "medium", "default")
+	case strings.Contains(providerID, "google"):
+		return firstMatchingVariant(values, "high", "medium", "default")
+	case strings.Contains(providerID, "openai"):
+		return firstMatchingVariant(values, "medium", "high", "default")
+	default:
+		return firstMatchingVariant(values, "default", "medium", "high")
+	}
+}
+
+func firstMatchingVariant(values []string, candidates ...string) string {
+	for _, candidate := range candidates {
+		for _, value := range values {
+			if value == candidate {
+				return value
+			}
+		}
+	}
+	return values[0]
+}
+
+func appendProbeMessage(current string, addition string) string {
+	current = strings.TrimSpace(current)
+	addition = strings.TrimSpace(addition)
+	if current == "" {
+		return addition
+	}
+	if addition == "" {
+		return current
+	}
+	return current + " " + addition
 }
 
 func opencodeAgentName(value string) string {

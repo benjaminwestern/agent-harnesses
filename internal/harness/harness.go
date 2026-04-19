@@ -131,7 +131,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w,
+	_, _ = fmt.Fprint(w,
 		"Usage:\n"+
 			"  agent_harness emit --runtime <codex|gemini|claude|opencode|pi> [emit flags]\n"+
 			"  agent_harness install --runtime <codex|gemini|claude|opencode|pi> [--scope repo|global] [helper flags]\n"+
@@ -1185,7 +1185,9 @@ func sendToUnixSocket(path string, payload []byte) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	_, err = conn.Write(payload)
 	return err
@@ -1202,7 +1204,7 @@ func runListener(options ListenOptions, stdout io.Writer) error {
 		return err
 	}
 	defer func() {
-		listener.Close()
+		_ = listener.Close()
 		_ = os.Remove(options.SocketPath)
 	}()
 
@@ -1212,10 +1214,10 @@ func runListener(options ListenOptions, stdout io.Writer) error {
 			return err
 		}
 		if _, err := io.Copy(stdout, conn); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return err
 		}
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 

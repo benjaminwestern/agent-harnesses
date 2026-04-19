@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -355,7 +354,7 @@ func installHelperBinary(target string) error {
 	}
 	source, err = filepath.EvalSymlinks(source)
 	if err != nil {
-		source = source
+		source = filepath.Clean(source)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
@@ -913,8 +912,8 @@ func shellQuote(value string) string {
 		return "''"
 	}
 	if strings.IndexFunc(value, func(r rune) bool {
-		return !(r == '-' || r == '_' || r == '/' || r == '.' || r == ':' || r == '=' ||
-			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+		return r != '-' && r != '_' && r != '/' && r != '.' && r != ':' && r != '=' &&
+			(r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9')
 	}) == -1 {
 		return value
 	}
@@ -984,13 +983,4 @@ func firstNonEmptyEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func sortedKeys(values map[string]any) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

@@ -14,7 +14,7 @@ Official references:
 - [pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [pi session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md)
 
-This bundle was validated against `@mariozechner/pi-coding-agent 0.66.1`, the
+This bundle was validated against `@mariozechner/pi-coding-agent 0.67.68`, the
 installed version on the validation machine.
 
 ## Install pi
@@ -93,6 +93,15 @@ The controller starts pi with `--no-extensions` so app-managed sessions stay
 predictable and do not inherit arbitrary user or project extensions. Passive
 observation remains available through the separate `agent_harness` extension
 bundle.
+
+Model inventory is a known control-plane gap. pi does maintain a model
+registry and exposes it through `/model` and `pi --list-models`, including
+auth-filtered built-ins and custom `~/.pi/agent/models.json` entries. It does
+not currently document a stable JSON/RPC inventory method for host
+integrations, so Agentic Control does not expose pi models through
+`system.describe` yet. The probe reports pi install/version state with
+`model_source: "runtime_default"` until a stable machine-readable contract is
+available.
 
 ## What pi passes to the harness extension
 

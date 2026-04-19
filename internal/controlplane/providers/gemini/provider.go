@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/modelcatalog"
+	"github.com/benjaminwestern/agentic-control/internal/controlplane/providerprobe"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
 )
@@ -30,6 +32,7 @@ type Provider struct {
 	mu       sync.RWMutex
 	sessions map[string]*session
 	emit     eventSink
+	probe    *providerprobe.Cache
 }
 
 type session struct {
@@ -47,6 +50,11 @@ type session struct {
 	lastError         string
 	stopping          bool
 	prompting         bool
+	activeTurnID      string
+	turnItems         []any
+	turns             []storedTurn
+	sessionFilePath   string
+	settingsPath      string
 	nextRequestID     int64
 	pendingCalls      map[string]chan rpcMessage
 	pendingRequests   map[string]pendingRequest
@@ -58,6 +66,13 @@ type pendingRequest struct {
 	NativeID json.RawMessage
 	Method   string
 	Request  contract.PendingRequest
+}
+
+type storedTurn struct {
+	TurnID            string `json:"turn_id"`
+	Items             []any  `json:"items,omitempty"`
+	SnapshotSessionID string `json:"snapshot_session_id,omitempty"`
+	SnapshotFilePath  string `json:"snapshot_file_path,omitempty"`
 }
 
 type rpcMessage struct {
@@ -83,6 +98,8 @@ func NewProvider(emit func(contract.RuntimeEvent)) *Provider {
 	return &Provider{
 		sessions: make(map[string]*session),
 		emit:     emit,
+		probe: providerprobe.New(geminiBinaryPath, "--version").
+			WithModels("built_in", modelcatalog.Gemini()),
 	}
 }
 
@@ -91,7 +108,7 @@ func (p *Provider) Runtime() string {
 }
 
 func (p *Provider) Describe() contract.RuntimeDescriptor {
-	return contract.NewRuntimeDescriptor(
+	descriptor := contract.NewRuntimeDescriptor(
 		runtimeName,
 		contract.OwnershipControlled,
 		contract.TransportACP,
@@ -110,6 +127,8 @@ func (p *Provider) Describe() contract.RuntimeDescriptor {
 			ResumeByProviderID:       true,
 		},
 	)
+	descriptor.Probe = p.probe.Snapshot(context.Background())
+	return descriptor
 }
 
 func (p *Provider) StartSession(
@@ -120,9 +139,16 @@ func (p *Provider) StartSession(
 	if err != nil {
 		return nil, err
 	}
-
-	sess, err := p.spawnProcess(ctx, request.SessionID, resolvedCWD, request.Model)
+	modelAlias, err := prepareGeminiModelAlias(request.SessionID, request.Model, request.ModelOptions)
 	if err != nil {
+		return nil, err
+	}
+
+	sess, err := p.spawnProcess(ctx, request.SessionID, resolvedCWD, request.Model, modelAlias.SettingsPath)
+	if err != nil {
+		if modelAlias.SettingsPath != "" {
+			_ = os.Remove(modelAlias.SettingsPath)
+		}
 		return nil, err
 	}
 
@@ -147,7 +173,11 @@ func (p *Provider) StartSession(
 	}
 
 	if request.Model != "" {
-		if err := sess.setRemoteModel(ctx, request.Model); err != nil {
+		remoteModel := request.Model
+		if modelAlias.Alias != "" {
+			remoteModel = modelAlias.Alias
+		}
+		if err := sess.setRemoteModel(ctx, remoteModel, request.Model); err != nil {
 			sess.close()
 			return nil, err
 		}
@@ -183,9 +213,16 @@ func (p *Provider) ResumeSession(
 	if err != nil {
 		return nil, err
 	}
-
-	sess, err := p.spawnProcess(ctx, request.SessionID, resolvedCWD, request.Model)
+	modelAlias, err := prepareGeminiModelAlias(request.SessionID, request.Model, request.ModelOptions)
 	if err != nil {
+		return nil, err
+	}
+
+	sess, err := p.spawnProcess(ctx, request.SessionID, resolvedCWD, request.Model, modelAlias.SettingsPath)
+	if err != nil {
+		if modelAlias.SettingsPath != "" {
+			_ = os.Remove(modelAlias.SettingsPath)
+		}
 		return nil, err
 	}
 
@@ -210,7 +247,11 @@ func (p *Provider) ResumeSession(
 	}
 
 	if request.Model != "" {
-		if err := sess.setRemoteModel(ctx, request.Model); err != nil {
+		remoteModel := request.Model
+		if modelAlias.Alias != "" {
+			remoteModel = modelAlias.Alias
+		}
+		if err := sess.setRemoteModel(ctx, remoteModel, request.Model); err != nil {
 			sess.close()
 			return nil, err
 		}
@@ -243,6 +284,9 @@ func (p *Provider) SendInput(
 		return nil, errors.New("gemini session already has an active prompt")
 	}
 
+	turnID := newGeminiTurnID()
+	sess.startTurn(turnID, request.Text)
+
 	responseChannel, err := sess.beginCall("session/prompt", map[string]any{
 		"sessionId": sess.providerSessionIDSnapshot(),
 		"prompt": []map[string]any{
@@ -253,13 +297,14 @@ func (p *Provider) SendInput(
 		},
 	})
 	if err != nil {
+		sess.finishTurnSnapshot()
 		return nil, err
 	}
 
 	sess.setPrompting(true)
 	sess.setStatus(contract.SessionRunning)
 
-	event := p.newEvent(sess, "turn.started", "session/prompt", "",
+	event := p.newEvent(sess, contract.EventTurnStarted, "session/prompt", turnID,
 		fmt.Sprintf("Started Gemini turn: %s", truncate(request.Text, 120)),
 		map[string]any{"status": string(contract.SessionRunning)},
 	)
@@ -369,10 +414,14 @@ func (p *Provider) spawnProcess(
 	appSessionID string,
 	cwd string,
 	model string,
+	settingsPath string,
 ) (*session, error) {
 	command := exec.CommandContext(ctx, geminiBinaryPath(), "--acp")
 	if cwd != "" {
 		command.Dir = cwd
+	}
+	if settingsPath != "" {
+		command.Env = append(os.Environ(), fmt.Sprintf("%s=%s", geminiSettingsEnv, settingsPath))
 	}
 
 	stdin, err := command.StdinPipe()
@@ -400,6 +449,7 @@ func (p *Provider) spawnProcess(
 		status:          contract.SessionStarting,
 		cwd:             cwd,
 		model:           model,
+		settingsPath:    settingsPath,
 		createdAtMS:     now,
 		updatedAtMS:     now,
 		pendingCalls:    make(map[string]chan rpcMessage),
@@ -476,7 +526,8 @@ func (s *session) finishPrompt(ctx context.Context, responseChannel <-chan rpcMe
 	if err != nil {
 		s.setStatus(contract.SessionIdle)
 		s.setLastError(err.Error())
-		s.provider.emit(s.provider.newEvent(s, "turn.errored", "session/prompt", "",
+		turnID, _ := s.finishTurnSnapshot()
+		s.provider.emit(s.provider.newEvent(s, contract.EventTurnErrored, "session/prompt", turnID,
 			fmt.Sprintf("Gemini prompt failed: %s", err),
 			map[string]any{
 				"status":     string(contract.SessionIdle),
@@ -496,7 +547,8 @@ func (s *session) finishPrompt(ctx context.Context, responseChannel <-chan rpcMe
 	if response.StopReason == "cancelled" {
 		s.setStatus(contract.SessionInterrupted)
 		payload["status"] = string(contract.SessionInterrupted)
-		s.provider.emit(s.provider.newEvent(s, "turn.interrupted", "session/prompt", "",
+		turnID, _ := s.finishTurnSnapshot()
+		s.provider.emit(s.provider.newEvent(s, contract.EventTurnInterrupted, "session/prompt", turnID,
 			"Gemini turn cancelled",
 			payload,
 		))
@@ -505,20 +557,28 @@ func (s *session) finishPrompt(ctx context.Context, responseChannel <-chan rpcMe
 
 	s.setStatus(contract.SessionIdle)
 	payload["status"] = string(contract.SessionIdle)
-	s.provider.emit(s.provider.newEvent(s, "turn.completed", "session/prompt", "",
+	turnID, items := s.finishTurnSnapshot()
+	storedTurn, snapshotErr := s.persistTurnSnapshot(turnID, items)
+	if snapshotErr != nil {
+		payload["snapshot_error"] = snapshotErr.Error()
+	} else if storedTurn.SnapshotSessionID != "" {
+		payload["snapshot_session_id"] = storedTurn.SnapshotSessionID
+		payload["snapshot_file_path"] = storedTurn.SnapshotFilePath
+	}
+	s.provider.emit(s.provider.newEvent(s, contract.EventTurnCompleted, "session/prompt", turnID,
 		fmt.Sprintf("Gemini turn completed: %s", response.StopReason),
 		payload,
 	))
 }
 
-func (s *session) setRemoteModel(ctx context.Context, model string) error {
+func (s *session) setRemoteModel(ctx context.Context, modelID string, displayModel string) error {
 	if err := s.call(ctx, "session/set_model", map[string]any{
 		"sessionId": s.providerSessionIDSnapshot(),
-		"modelId":   model,
+		"modelId":   modelID,
 	}, nil); err != nil {
 		return err
 	}
-	s.setModel(model)
+	s.setModel(displayModel)
 	return nil
 }
 
@@ -615,29 +675,34 @@ func (s *session) handleNotification(message rpcMessage) {
 		case "agent_message_chunk":
 			s.setStatus(contract.SessionRunning)
 			text := extractAcpText(params.Update["content"])
-			s.provider.emit(s.provider.newEvent(s, "assistant.message.delta", message.Method, "",
+			s.addTurnItem(map[string]any{"type": "assistant_message_chunk", "text": text})
+			s.provider.emit(s.provider.newEvent(s, contract.EventAssistantMessageDelta, message.Method, s.activeTurnIDSnapshot(),
 				truncate(coalesce(text, "Gemini assistant chunk"), 160),
 				map[string]any{
-					"delta":  text,
-					"status": string(contract.SessionRunning),
+					"delta":       text,
+					"stream_kind": "message",
+					"status":      string(contract.SessionRunning),
 				},
 			))
 		case "agent_thought_chunk":
 			text := extractAcpText(params.Update["content"])
-			s.provider.emit(s.provider.newEvent(s, "assistant.thought.delta", message.Method, "",
+			s.addTurnItem(map[string]any{"type": "assistant_thought_chunk", "text": text})
+			s.provider.emit(s.provider.newEvent(s, contract.EventAssistantThoughtDelta, message.Method, s.activeTurnIDSnapshot(),
 				truncate(coalesce(text, "Gemini thought chunk"), 160),
-				map[string]any{"delta": text},
+				map[string]any{"delta": text, "stream_kind": "reasoning"},
 			))
 		case "user_message_chunk":
 			text := extractAcpText(params.Update["content"])
-			s.provider.emit(s.provider.newEvent(s, "turn.input.acknowledged", message.Method, "",
+			s.addTurnItem(map[string]any{"type": "user_message_chunk", "text": text})
+			s.provider.emit(s.provider.newEvent(s, "turn.input.acknowledged", message.Method, s.activeTurnIDSnapshot(),
 				truncate(coalesce(text, "Gemini input acknowledged"), 160),
 				nil,
 			))
 		case "tool_call":
 			title, _ := params.Update["title"].(string)
 			status, _ := params.Update["status"].(string)
-			s.provider.emit(s.provider.newEvent(s, "tool_call.opened", message.Method, "",
+			s.addTurnItem(map[string]any{"type": "tool_call", "payload": params.Update})
+			s.provider.emit(s.provider.newEvent(s, contract.EventToolStarted, message.Method, s.activeTurnIDSnapshot(),
 				fmt.Sprintf("Gemini tool call %s: %s", coalesce(status, "opened"), coalesce(title, "tool")),
 				map[string]any{
 					"tool_call_id": valueAsString(params.Update["toolCallId"]),
@@ -648,12 +713,14 @@ func (s *session) handleNotification(message rpcMessage) {
 		case "tool_call_update":
 			title, _ := params.Update["title"].(string)
 			status, _ := params.Update["status"].(string)
-			s.provider.emit(s.provider.newEvent(s, "tool_call.updated", message.Method, "",
+			s.addTurnItem(map[string]any{"type": "tool_call_update", "payload": params.Update})
+			s.provider.emit(s.provider.newEvent(s, contract.EventToolProgress, message.Method, s.activeTurnIDSnapshot(),
 				fmt.Sprintf("Gemini tool call %s: %s", coalesce(status, "updated"), coalesce(title, "tool")),
 				map[string]any{
 					"tool_call_id": valueAsString(params.Update["toolCallId"]),
 					"status":       status,
 					"kind":         valueAsString(params.Update["kind"]),
+					"summary":      title,
 				},
 			))
 		case "available_commands_update":
@@ -662,7 +729,7 @@ func (s *session) handleNotification(message rpcMessage) {
 				map[string]any{"available_commands": params.Update["availableCommands"]},
 			))
 		case "current_mode_update":
-			s.provider.emit(s.provider.newEvent(s, "session.mode.updated", message.Method, "",
+			s.provider.emit(s.provider.newEvent(s, contract.EventSessionModeChanged, message.Method, s.activeTurnIDSnapshot(),
 				fmt.Sprintf("Gemini mode changed: %s", valueAsString(params.Update["currentModeId"])),
 				map[string]any{"current_mode_id": params.Update["currentModeId"]},
 			))
@@ -675,25 +742,32 @@ func (s *session) handleNotification(message rpcMessage) {
 			if title, _ := params.Update["title"].(string); title != "" {
 				s.setTitle(title)
 			}
-			s.provider.emit(s.provider.newEvent(s, "session.info.updated", message.Method, "",
+			if sessionFilePath, _ := params.Update["sessionFilePath"].(string); sessionFilePath != "" {
+				s.setSessionFilePath(sessionFilePath)
+			}
+			s.provider.emit(s.provider.newEvent(s, "session.info.updated", message.Method, s.activeTurnIDSnapshot(),
 				"Gemini session info updated",
 				map[string]any{
-					"title":      params.Update["title"],
-					"updated_at": params.Update["updatedAt"],
+					"title":             params.Update["title"],
+					"updated_at":        params.Update["updatedAt"],
+					"session_file_path": params.Update["sessionFilePath"],
 				},
 			))
 		case "plan":
-			s.provider.emit(s.provider.newEvent(s, "plan.updated", message.Method, "",
+			s.addTurnItem(map[string]any{"type": "plan", "payload": params.Update["entries"]})
+			s.provider.emit(s.provider.newEvent(s, contract.EventTurnPlanUpdated, message.Method, s.activeTurnIDSnapshot(),
 				"Gemini plan updated",
 				map[string]any{"plan": params.Update["entries"]},
 			))
 		case "usage_update":
-			s.provider.emit(s.provider.newEvent(s, "usage.updated", message.Method, "",
+			s.provider.emit(s.provider.newEvent(s, contract.EventThreadTokenUsageUpdated, message.Method, s.activeTurnIDSnapshot(),
 				"Gemini usage updated",
 				map[string]any{
-					"used": params.Update["used"],
-					"size": params.Update["size"],
-					"cost": params.Update["cost"],
+					"usage": map[string]any{
+						"used": params.Update["used"],
+						"size": params.Update["size"],
+						"cost": params.Update["cost"],
+					},
 				},
 			))
 		default:
@@ -870,11 +944,15 @@ func (s *session) writeJSON(value any) error {
 func (s *session) close() {
 	s.mu.Lock()
 	s.stopping = true
+	settingsPath := s.settingsPath
 	s.mu.Unlock()
 	if s.cmd.Process != nil {
 		_ = s.cmd.Process.Signal(syscall.SIGTERM)
 	}
 	_ = s.stdin.Close()
+	if settingsPath != "" {
+		_ = os.Remove(settingsPath)
+	}
 }
 
 func (s *session) nextID() int64 {
@@ -914,6 +992,7 @@ func (s *session) snapshot() *contract.RuntimeSession {
 		Transport:         contract.TransportACP,
 		Status:            s.status,
 		ProviderSessionID: s.providerSessionID,
+		ActiveTurnID:      s.activeTurnID,
 		CWD:               s.cwd,
 		Model:             s.model,
 		Title:             s.title,
@@ -921,7 +1000,38 @@ func (s *session) snapshot() *contract.RuntimeSession {
 		UpdatedAtMS:       s.updatedAtMS,
 		LastActivityAtMS:  s.updatedAtMS,
 		LastError:         s.lastError,
+		Metadata:          s.snapshotMetadataLocked(),
 	}
+}
+
+func (s *session) snapshotMetadataLocked() map[string]any {
+	metadata := map[string]any{}
+	if s.sessionFilePath != "" {
+		metadata["session_file_path"] = s.sessionFilePath
+	}
+	if len(s.turns) > 0 {
+		snapshots := make([]map[string]any, 0, len(s.turns))
+		for _, turn := range s.turns {
+			if turn.SnapshotSessionID == "" {
+				continue
+			}
+			snapshot := map[string]any{
+				"turn_id":    turn.TurnID,
+				"session_id": turn.SnapshotSessionID,
+			}
+			if turn.SnapshotFilePath != "" {
+				snapshot["file_path"] = turn.SnapshotFilePath
+			}
+			snapshots = append(snapshots, snapshot)
+		}
+		if len(snapshots) > 0 {
+			metadata["snapshots"] = snapshots
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }
 
 func (s *session) setProviderSessionID(value string) {
@@ -972,10 +1082,61 @@ func (s *session) setPrompting(value bool) {
 	s.updatedAtMS = time.Now().UnixMilli()
 }
 
+func (s *session) startTurn(turnID string, text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeTurnID = turnID
+	s.turnItems = []any{
+		map[string]any{
+			"type": "user_text",
+			"text": text,
+		},
+	}
+	s.updatedAtMS = time.Now().UnixMilli()
+}
+
+func (s *session) addTurnItem(item any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeTurnID == "" {
+		return
+	}
+	s.turnItems = append(s.turnItems, item)
+	s.updatedAtMS = time.Now().UnixMilli()
+}
+
+func (s *session) finishTurnSnapshot() (string, []any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	turnID := s.activeTurnID
+	items := cloneUnknownItems(s.turnItems)
+	s.turnItems = nil
+	s.activeTurnID = ""
+	s.updatedAtMS = time.Now().UnixMilli()
+	return turnID, items
+}
+
+func (s *session) setSessionFilePath(value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessionFilePath = value
+	s.updatedAtMS = time.Now().UnixMilli()
+}
+
 func (s *session) promptingSnapshot() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.prompting
+}
+
+func (s *session) activeTurnIDSnapshot() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.activeTurnID
 }
 
 func (s *session) isStopping() bool {
@@ -1172,9 +1333,9 @@ func valueAsString(value any) string {
 	switch typed := value.(type) {
 	case string:
 		return typed
-	case fmt.Stringer:
-		return typed.String()
 	case json.Number:
+		return typed.String()
+	case fmt.Stringer:
 		return typed.String()
 	default:
 		return ""
@@ -1197,6 +1358,10 @@ func geminiBinaryPath() string {
 		return value
 	}
 	return "gemini"
+}
+
+func newGeminiTurnID() string {
+	return fmt.Sprintf("turn-%d", time.Now().UnixNano())
 }
 
 func truncate(value string, maxLen int) string {
