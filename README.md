@@ -1,178 +1,384 @@
 ![Agentic Control banner](assets/banner.svg)
 
-`Agentic Control` gives host applications one app-owned way to observe and
-control multiple agent runtimes without baking vendor-specific behaviour into
-the product layer. Use `agent_control` when your application needs to start,
-resume, interrupt, and answer runtime requests directly. Use `agent_harness`
-when you need passive hook, plugin, or extension observation for unmanaged
-sessions,
-investigation, or diagnostics.
+Agentic Control is a small Go control layer for products that need to run
+local agent CLIs without hard-coding each runtime into the product itself.
 
-This repository is designed around three outcomes:
+It gives upstream services two surfaces:
 
-- Keep runtime instrumentation generic enough to port between applications.
-- Keep correlation explicit so the helper never assumes your internal role
-  model or environment variable names.
-- Keep setup practical with one shared installer, a shared helper binary, and
-  a live debug mode that mirrors the production transport.
+- `agent_control` for app-owned sessions across Codex, Gemini, Claude,
+  OpenCode, and pi.
+- `agent_harness` for passive hook, plugin, and extension telemetry from
+  sessions launched outside your app.
+
+For new integrations, start with `agent_control`. It discovers local installs,
+reports auth state, exposes available models where the runtime has a stable
+inventory surface, starts and resumes sessions, sends input, interrupts work,
+answers runtime requests, and streams normalised events.
+
+The passive harness still matters for diagnostics and unmanaged sessions, but
+it is no longer the centre of the repository.
 
 ---
 
 ![Overview](assets/header-overview.svg)
 
-Choose your integration path first:
+## What This Repo Provides
 
-- `agent_control`
-  Use this when your application owns the session lifecycle and needs a unified
-  control plane across Codex, Gemini, Claude, OpenCode, and pi.
-- `agent_harness`
-  Use this when the runtime is launched elsewhere and you only need passive
-  hook, plugin, or extension events translated into the shared event contract.
+Agentic Control keeps runtime-specific behaviour behind a small contract that
+host applications can import or run over a Unix socket.
 
-If you are integrating this into a host product, start with:
+| Need | Use | Primary files |
+| --- | --- | --- |
+| Discover installed runtimes, auth, capabilities, and models | `agent_control describe` or `embedded.ControlPlane.Describe()` | [`cmd/agent-control/main.go`](cmd/agent-control/main.go), [`pkg/controlplane/embedded/embedded.go`](pkg/controlplane/embedded/embedded.go) |
+| Start, resume, send to, interrupt, respond to, stop, and list sessions | `agent_control serve` or `embedded.ControlPlane` | [`internal/controlplane/`](internal/controlplane), [`pkg/controlplane/types.go`](pkg/controlplane/types.go) |
+| Route model-backed text generation work in upstream services | `pkg/controlplane.TextGenerationRouter` | [`pkg/controlplane/textgen.go`](pkg/controlplane/textgen.go) |
+| Capture unmanaged runtime telemetry | `agent_harness install`, `agent_harness listen`, and runtime bundles | [`cmd/agent-harness/main.go`](cmd/agent-harness/main.go), [`internal/harness/harness.go`](internal/harness/harness.go), [`internal/harness/install.go`](internal/harness/install.go), [`internal/harness/run.go`](internal/harness/run.go) |
+| Consume stable JSON contracts | Go contract types | [`pkg/contract/controlplane.go`](pkg/contract/controlplane.go), [`pkg/contract/harness.go`](pkg/contract/harness.go) |
 
-- [`docs/control-plane.md`](./docs/control-plane.md) for app-managed sessions
-- [`docs/integration.md`](./docs/integration.md) for the host integration model
-- the runtime guide for the runtime you are wiring in first
+The runtime adapters are deliberately boring:
 
-The public surface stays intentionally small. The shared helper binary
-starts at [`cmd/agent-harness/main.go`](./cmd/agent-harness/main.go), the
-runtime translation logic lives in [`internal/harness/`](./internal/harness),
-and the shared contracts live in [`pkg/contract/`](./pkg/contract). The
-provider-facing Go boundary for the controller lives in
-[`pkg/controlplane/`](./pkg/controlplane). The Go `agent_harness` binary
-owns event translation, hook, plugin, and extension bundle installation,
-and interactive live-run diagnostics. [`runtimes/`](./runtimes) contains the
-runtime-specific fixtures, prompts, plugin source, and notes. [`docs/`](./docs)
-holds the durable contract and integration guidance. [`mise.toml`](./mise.toml)
-and [`hk.pkl`](./hk.pkl) are the source of truth for local automation, and
-[`scripts/`](./scripts) holds only the README asset generator and README
-validator.
+- Codex uses `codex app-server` for controlled sessions and native hooks for
+  passive telemetry.
+- Gemini uses `gemini --acp` for controlled sessions and native hooks for
+  passive telemetry.
+- Claude uses the official Agent SDK through a local bridge for controlled
+  sessions and native hooks for passive telemetry.
+- OpenCode uses `opencode serve` for controlled sessions and native plugins for
+  passive telemetry.
+- pi uses `pi --mode rpc` for controlled sessions and native extensions for
+  passive telemetry.
 
-Host applications should prefer the Go SDK helpers in `pkg/contract` and
-`pkg/controlplane` over matching event strings or reimplementing session
-adoption locally. The package exposes event constants, request-event and
-terminal-turn helpers, payload extraction, turn accumulation, and
-adopt-or-resume session helpers so applications can stay focused on their own
-workflow model.
+Read these next:
 
-The repository has two runtime surfaces:
-
-- `agent_harness` for passive hook, plugin, and extension observation
-- `agent_control` for app-owned Codex, Gemini, Claude, OpenCode, and pi
-  sessions
-
-`agent_control` exposes a single bootstrap call, `system.describe`, so host
-applications can discover runtime capabilities before they start or resume
-sessions.
-
-`agent_control` is the primary integration surface for new application
-work. `agent_harness` is the secondary path for passive observation,
-investigation, unmanaged external sessions, and native hook, plugin, or
-extension capture.
-
-The repository stays generic on purpose. It does not know about your internal
-roles, workflow states, or ownership model. Instead, your application chooses
-what to bind and what to infer. The helper only translates runtime-native
-signals into a stable, app-owned event stream.
-
-Runtime coverage:
-
-- Codex via native hooks and `codex app-server`
-- Gemini via native hooks and `gemini --acp`
-- Claude via native hooks and a local Claude Agent SDK bridge
-- OpenCode via native plugins and `opencode serve`
-- pi via native extensions and `pi --mode rpc`
+- [Control-plane guide](docs/control-plane.md) for `system.describe`, session
+  RPC, local probes, auth state, and model inventory.
+- [Integration guide](docs/integration.md) for embedding Agentic Control into a
+  host service.
+- [Event contract](docs/contract.md) for the passive harness event shape.
+- Runtime guides for [Codex](docs/codex.md), [Gemini](docs/gemini.md),
+  [Claude](docs/claude.md), [OpenCode](docs/opencode.md), and [pi](docs/pi.md).
 
 ---
 
 ![Install and run](assets/header-install.svg)
 
-If you want a quick local evaluation, build the binaries and replay the sample
-fixtures first:
+## Quick Start
+
+Build the two binaries:
 
 ```bash
 mise trust
 mise install
 mise run build
-mise run diag:fixtures:codex
-mise run diag:fixtures:gemini
-mise run diag:fixtures:claude
-mise run diag:fixtures:opencode
-mise run diag:fixtures:pi
 ```
 
-The helper builds with Go. You do not need a Zig toolchain to replay
-fixtures or install the runtime bundles. The build also bootstraps the Claude
-Agent SDK bridge dependency the first time you compile `agent_control`.
-
-The most useful local commands are:
-
-| Command | Purpose |
-| --- | --- |
-| `mise run build` | Build `agent_harness` and `agent_control`. |
-| `mise run diag:listen` | Start a local debug listener on the default socket. |
-| `mise run control:serve` | Start the Go control-plane on a local Unix socket. |
-| `mise run diag:fixtures:codex` | Replay every Codex fixture through the helper. |
-| `mise run diag:fixtures:gemini` | Replay every Gemini fixture through the helper. |
-| `mise run diag:fixtures:claude` | Replay every Claude fixture through the helper. |
-| `mise run diag:fixtures:opencode` | Replay every OpenCode fixture through the helper. |
-| `mise run diag:fixtures:pi` | Replay every pi fixture through the helper. |
-| `mise run diag:install:codex` | Install the repo-local Codex bundle for live testing. |
-| `mise run diag:install:gemini` | Install the repo-local Gemini bundle for live testing. |
-| `mise run diag:install:claude` | Install the repo-local Claude bundle for live testing. |
-| `mise run diag:install:opencode` | Install the global OpenCode bundle for live testing. |
-| `mise run diag:install:pi` | Install the repo-local pi bundle for live testing. |
-| `mise run diag:codex:smoke` | Run a live Codex smoke scenario. |
-| `mise run diag:codex:bash` | Run a live Codex Bash scenario. |
-| `mise run diag:codex:approval` | Run a live Codex approval scenario. |
-| `mise run diag:gemini:smoke` | Run a live Gemini smoke scenario. |
-| `mise run diag:gemini:bash` | Run a live Gemini Bash scenario. |
-| `mise run diag:gemini:approval` | Run a live Gemini approval scenario. |
-| `mise run diag:claude:smoke` | Run a live Claude smoke scenario. |
-| `mise run diag:claude:bash` | Run a live Claude Bash scenario. |
-| `mise run diag:claude:approval` | Run a live Claude approval scenario. |
-| `mise run diag:opencode:smoke` | Run a live OpenCode smoke scenario. |
-| `mise run diag:opencode:bash` | Run a live OpenCode Bash scenario. |
-| `mise run diag:opencode:approval` | Run a live OpenCode approval scenario. |
-| `mise run diag:pi:smoke` | Run a pi smoke scenario. |
-| `mise run diag:pi:bash` | Run a pi tool scenario. |
-| `mise run diag:pi:approval` | Run a pi write scenario. |
-
-For direct helper usage without `mise`, run:
+Start the control-plane:
 
 ```bash
-.artifacts/bin/agent_harness listen --socket-path /tmp/agent-harness.sock
-.artifacts/bin/agent_harness --runtime codex --stdout < runtimes/codex/fixtures/session_start.json
-.artifacts/bin/agent_harness install --runtime codex --scope repo --socket-env AGENT_HARNESS_SOCKET
-.artifacts/bin/agent_harness install --runtime pi --scope repo --socket-env AGENT_HARNESS_SOCKET
-.artifacts/bin/agent_harness uninstall --runtime codex --scope repo
-.artifacts/bin/agent_harness uninstall --runtime pi --scope repo
 .artifacts/bin/agent_control serve --socket-path /tmp/agentic-control.sock
+```
+
+In another terminal, ask it what the local machine can run:
+
+```bash
 .artifacts/bin/agent_control describe --socket-path /tmp/agentic-control.sock
 ```
+
+That call is the first useful integration point. It returns:
+
+- the control-plane schema and wire protocol versions
+- supported RPC methods
+- one descriptor per runtime
+- local binary install status
+- runtime version and resolved binary path
+- auth state where a runtime exposes a usable status command
+- model inventory and model option metadata where the runtime exposes it
+
+The same control-plane can be imported directly from Go:
+
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/benjaminwestern/agentic-control/pkg/controlplane/embedded"
+)
+
+func main() {
+	cp := embedded.New()
+	describe := cp.Describe()
+
+	for _, runtime := range describe.Runtimes {
+		status := "unknown"
+		if runtime.Probe != nil {
+			status = runtime.Probe.Status
+		}
+		fmt.Printf("%s: %s\n", runtime.Runtime, status)
+	}
+}
+```
+
+The build bootstraps the Claude SDK bridge dependency the first time
+`agent_control` is compiled. That bridge is only for Claude's official Agent
+SDK approval and input callback path; there is no extra bridge for pi model
+inventory.
 
 ---
 
 ![Runtime support](assets/header-runtimes.svg)
 
-Each runtime bundle is kept independent so that the shared contract does not
-need to change when a vendor changes its hook surface.
+## Runtime Matrix
 
-Installation is centralised. Use the shared Go installer with `--runtime` and,
-when needed, `--scope`:
+The current release was validated on April 19, 2026 against these local CLI
+versions:
+
+| Runtime | Validated version | Controlled session transport | Passive telemetry | Model inventory |
+| --- | --- | --- | --- | --- |
+| Codex | `codex-cli 0.121.0` | `codex app-server` | native hooks | built-in catalogue |
+| Gemini | `0.38.2` | `gemini --acp` | native hooks | built-in catalogue |
+| Claude | `2.1.98 (Claude Code)` | Claude Agent SDK bridge | native hooks | built-in catalogue |
+| OpenCode | `1.14.17` | `opencode serve` | native plugin | dynamic `/provider` inventory when the server exposes it |
+| pi | `0.67.68` | `pi --mode rpc` | native extension | gap: no stable documented JSON/RPC model inventory contract |
+
+Install references:
+
+| Runtime | Install guide | Native reference |
+| --- | --- | --- |
+| Codex | [Codex CLI quickstart and install](https://github.com/openai/codex#quickstart) | [Codex hooks](https://developers.openai.com/codex/hooks), [Codex plugins](https://developers.openai.com/codex/plugins), [Codex plugin packaging](https://developers.openai.com/codex/plugins/build) |
+| Gemini | [Gemini CLI installation](https://geminicli.com/docs/get-started/installation/) | [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/) |
+| Claude | [Claude Code setup](https://docs.claude.com/en/docs/claude-code/setup) | [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) |
+| OpenCode | [OpenCode install guide](https://opencode.ai/docs/) | [OpenCode plugins](https://opencode.ai/docs/plugins/), [OpenCode config](https://opencode.ai/docs/config/), [OpenCode permissions](https://opencode.ai/docs/permissions/), [OpenCode server](https://opencode.ai/docs/server/) |
+| pi | [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) | [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md), [pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md) |
+
+The pi model inventory gap is intentional in the API. pi has model registry
+behaviour and a CLI-facing model list path, but the current public docs do not
+define a stable machine-readable inventory contract that matches Codex,
+Gemini, Claude, or OpenCode. Until that exists, `system.describe` reports pi
+install and version state with `model_source: "runtime_default"` and an empty
+`models` list.
+
+---
+
+![Event contract](assets/header-contract.svg)
+
+## Control-Plane Contract
+
+`system.describe` is the bootstrap call every upstream service should make
+before rendering a backend picker or starting work.
+
+Minimal request:
+
+```json
+{"id":"describe-1","method":"system.describe"}
+```
+
+Response shape:
+
+```json
+{
+  "schema_version": "agentic-control.control-plane.v1",
+  "wire_protocol_version": "agentic-control.rpc.v1",
+  "methods": [
+    "system.ping",
+    "system.describe",
+    "events.subscribe",
+    "events.unsubscribe",
+    "session.start",
+    "session.resume",
+    "session.send",
+    "session.interrupt",
+    "session.respond",
+    "session.stop",
+    "session.list"
+  ],
+  "runtimes": [
+    {
+      "schema_version": "agentic-control.control-plane.v1",
+      "runtime": "codex",
+      "ownership": "controlled",
+      "transport": "app_server",
+      "capabilities": {
+        "start_session": true,
+        "resume_session": true,
+        "send_input": true,
+        "interrupt": true,
+        "respond": true,
+        "stop_session": true,
+        "list_sessions": true,
+        "stream_events": true,
+        "approval_requests": true,
+        "user_input_requests": true,
+        "immediate_provider_session": true,
+        "resume_by_provider_id": true,
+        "adopt_external_sessions": false
+      },
+      "probe": {
+        "installed": true,
+        "status": "ready",
+        "version": "codex-cli 0.121.0",
+        "binary_path": "/opt/homebrew/bin/codex",
+        "auth": {
+          "status": "authenticated",
+          "method": "login status"
+        },
+        "model_source": "built_in",
+        "models": [
+          {
+            "id": "gpt-5.4",
+            "label": "GPT-5.4",
+            "provider": "codex",
+            "default": true,
+            "capabilities": {
+              "reasoning_effort_levels": [
+                {"value": "xhigh", "label": "Extra High"},
+                {"value": "high", "label": "High", "is_default": true},
+                {"value": "medium", "label": "Medium"},
+                {"value": "low", "label": "Low"}
+              ],
+              "supports_fast_mode": true
+            }
+          }
+        ],
+        "message": "Runtime binary found",
+        "probed_at_ms": 1775200000000
+      }
+    }
+  ]
+}
+```
+
+Use the probe for UX, not as the source of provider capability truth:
+
+- `capabilities` says what the Agentic Control provider implementation can do.
+- `probe.installed`, `probe.status`, `probe.version`, and
+  `probe.binary_path` describe the current machine.
+- `probe.auth` describes whether the local runtime appears authenticated.
+- `probe.models` and `probe.model_source` describe the models available for
+  picker UI and upstream routing.
+
+Session and event types live in [pkg/contract/controlplane.go](pkg/contract/controlplane.go).
+Provider request types live in [pkg/controlplane/types.go](pkg/controlplane/types.go).
+
+---
+
+![Bindings](assets/header-bindings.svg)
+
+## Unified Text Router
+
+Upstream services often need model-backed text generation without caring which
+runtime should handle the request. The public router in
+[pkg/controlplane/textgen.go](pkg/controlplane/textgen.go) centralises that
+selection logic.
+
+Supported generation surfaces:
+
+- commit messages
+- pull-request titles and bodies
+- branch names
+- thread titles
+
+The router resolves providers in this order:
+
+1. explicit provider
+2. provider inferred from the model ID
+3. fallback providers
+4. router default provider
+
+Built-in inference rules:
+
+| Model shape | Provider |
+| --- | --- |
+| `claude-*` | Claude |
+| `gemini-*` or `auto-gemini-*` | Gemini |
+| `gpt-*`, `o1*`, `o3*`, or `o4*` | Codex |
+| provider-scoped IDs like `anthropic/claude-sonnet-4-6` | OpenCode |
+
+Example:
+
+```go
+router := controlplane.NewTextGenerationRouter("codex", map[string]controlplane.TextGenerationProvider{
+	"codex":    codexProvider,
+	"claude":   claudeProvider,
+	"gemini":   geminiProvider,
+	"opencode": openCodeProvider,
+})
+
+result, err := router.GenerateCommitMessageForSelection(ctx, controlplane.CommitMessageInput{
+	ModelSelection: controlplane.TextGenerationModelSelection{
+		Model: "claude-sonnet-4-6",
+		Options: controlplane.ModelOptions{
+			ReasoningEffort: "high",
+		},
+		Fallbacks: []string{"codex"},
+	},
+	Diff: diff,
+})
+```
+
+That keeps product code focused on its own workflow model while preserving the
+selected runtime, model, reasoning effort, thinking level, and thinking budget.
+
+---
+
+![How it works](assets/header-architecture.svg)
+
+## Architecture
+
+![Architecture overview](assets/architecture.svg)
+
+The controlled-session path is:
+
+1. The host app imports `pkg/controlplane/embedded` or starts
+   `agent_control serve`.
+2. The app calls `system.describe` and renders only the runtimes that are
+   installed and usable.
+3. The app starts or resumes a runtime session.
+4. Agentic Control normalises runtime events, session state, approvals, and
+   user-input requests.
+5. The app subscribes to events and responds through one control-plane API.
+
+The passive telemetry path is:
+
+1. The host installs a runtime bundle with `agent_harness install`.
+2. The runtime invokes `agent_harness` through its native hook, plugin, or
+   extension surface.
+3. The helper translates native payloads into the harness event contract.
+4. The host consumes events from stdout or a local Unix socket listener.
+
+Generated diagrams come from [assets/architecture.d2](assets/architecture.d2).
+
+---
+
+![Debug mode](assets/header-debug.svg)
+
+## Passive Harness
+
+Use `agent_harness` when your app does not own the runtime process or when you
+need to inspect native runtime events during integration work.
+
+Start a listener:
+
+```bash
+.artifacts/bin/agent_harness listen --socket-path /tmp/agent-harness.sock
+```
+
+Install repo-local bundles for hook-based runtimes:
 
 ```bash
 .artifacts/bin/agent_harness install --runtime codex --scope repo --socket-env AGENT_HARNESS_SOCKET
 .artifacts/bin/agent_harness install --runtime gemini --scope repo --socket-env AGENT_HARNESS_SOCKET
 .artifacts/bin/agent_harness install --runtime claude --scope repo --socket-env AGENT_HARNESS_SOCKET
-.artifacts/bin/agent_harness install --runtime opencode --scope global --socket-env AGENT_HARNESS_SOCKET
 .artifacts/bin/agent_harness install --runtime pi --scope repo --socket-env AGENT_HARNESS_SOCKET
 ```
 
-To safely remove only the Agentic Control hook, plugin, or extension content
-later, use the
-matching uninstall command:
+Install OpenCode globally when you want its normal plugin auto-load path:
+
+```bash
+.artifacts/bin/agent_harness install --runtime opencode --scope global --socket-env AGENT_HARNESS_SOCKET
+```
+
+Remove only Agentic Control-managed config later:
 
 ```bash
 .artifacts/bin/agent_harness uninstall --runtime codex --scope repo
@@ -182,230 +388,55 @@ matching uninstall command:
 .artifacts/bin/agent_harness uninstall --runtime pi --scope repo
 ```
 
-The hook bundles and live scenarios in this repository were validated on April
-19, 2026 against these installed CLI versions:
-
-| Runtime | Validated version | Install guide | Native reference |
-| --- | --- | --- | --- |
-| Codex | `codex-cli 0.121.0` | [Codex CLI quickstart and install](https://github.com/openai/codex#quickstart) | [Codex hooks](https://developers.openai.com/codex/hooks) |
-| Gemini | `0.38.2` | [Gemini CLI installation](https://geminicli.com/docs/get-started/installation/) | [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/) |
-| Claude | `2.1.98 (Claude Code)` | [Claude Code setup](https://docs.claude.com/en/docs/claude-code/setup) | [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) |
-| OpenCode | `1.14.17` | [OpenCode install guide](https://opencode.ai/docs/) | [OpenCode plugins](https://opencode.ai/docs/plugins/) |
-| pi | `0.67.68` | [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) | [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md) |
-
-If you are running different versions, rerun the fixture replay and live
-diagnostic tasks before assuming the same hook payloads or launch behaviour.
-
-Runtime guides:
-
-- [Codex runtime guide](docs/codex.md)
-- [Gemini runtime guide](docs/gemini.md)
-- [Claude runtime guide](docs/claude.md)
-- [OpenCode runtime guide](docs/opencode.md)
-- [pi runtime guide](docs/pi.md)
-- [Control-plane guide](docs/control-plane.md)
-
-Official reference links:
-
-- [Codex hooks](https://developers.openai.com/codex/hooks)
-- [Codex plugins](https://developers.openai.com/codex/plugins)
-- [Codex plugin packaging](https://developers.openai.com/codex/plugins/build)
-- [Gemini CLI hooks guide](https://geminicli.com/docs/hooks/)
-- [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/)
-- [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
-- [OpenCode install guide](https://opencode.ai/docs/)
-- [OpenCode plugins](https://opencode.ai/docs/plugins/)
-- [OpenCode config](https://opencode.ai/docs/config/)
-- [OpenCode permissions](https://opencode.ai/docs/permissions/)
-- [OpenCode server](https://opencode.ai/docs/server/)
-- [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent)
-- [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md)
-- [pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
-
-The repository uses the strongest native extension surface each runtime
-exposes. That means hooks where a runtime provides hooks, and plugins where a
-runtime exposes plugin-native lifecycle events. The event contract stays built
-around hook-like investigation signals rather than indirect tool shims.
-
-Repo-local installation is the default for Codex, Gemini, Claude, and pi.
-OpenCode is global by default because it already auto-loads plugins from a dedicated
-global plugin directory without editing `opencode.json`. Every runtime
-supports an explicit `repo` or `global` install mode where that distinction is
-useful. When you install both a global and a repo-local OpenCode bundle, the
-repo-local bundle is the active bundle for that repository, and the global
-plugin does not emit duplicate events.
-
-Install and uninstall are intentionally runtime-local. The Go installer
-keeps each bundle under the runtime’s own repo-local or global config tree so
-it can remove only the Agentic Control content later without guessing about
-shared state.
-
-For host applications, that means you can adopt the runtime bundle that matches
-your immediate need without leaking app-specific naming into the shared helper.
-Your application decides what to bind. The helper only standardises the native
-payload shape and transport.
-
----
-
-![Event contract](assets/header-contract.svg)
-
-The normalised event contract is documented in
-[docs/contract.md](./docs/contract.md), and the machine-readable Go contract
-types live in [`pkg/contract/`](./pkg/contract). At a high level, every event
-contains:
-
-- runtime identity
-- native event name
-- normalised event type
-- a concise summary
-- runtime-native session or tool identifiers when available
-- optional `bindings` contributed by the host application
-
-The normalised event families are:
-
-- `session.started`
-- `session.ended`
-- `turn.user_prompt_submitted`
-- `turn.finished`
-- `turn.failed`
-- `turn.stopped`
-- `tool.started`
-- `tool.finished`
-- `tool.failed`
-- `tool.permission_requested`
-- `notification`
-- `runtime.event`
-
-The helper preserves native identifiers where the runtime exposes them. That is
-why the contract includes fields such as `session_id`, `turn_id`,
-`tool_call_id`, `tool_name`, `command`, `cwd`, `model`, `transcript_path`, and
-`runtime_pid` when they are available.
-
-If you want the runtime-specific details behind those fields, read the
-dedicated reference pages:
-
-- [Codex runtime guide](docs/codex.md)
-- [Gemini runtime guide](docs/gemini.md)
-- [Claude runtime guide](docs/claude.md)
-- [OpenCode runtime guide](docs/opencode.md)
-- [pi runtime guide](docs/pi.md)
-
-The session and event types used by the Go control-plane also live in
-[`pkg/contract/controlplane.go`](./pkg/contract/controlplane.go).
-
----
-
-![Bindings](assets/header-bindings.svg)
-
-Bindings are the mechanism that keeps the helper portable. Instead of assuming
-that every application exports the same environment variables, the helper lets
-you opt into correlation explicitly.
-
-If your application exports:
-
-- `APP_LAUNCH_ID`
-- `APP_SESSION_ID`
-- `APP_ACTOR_ID`
-- `APP_HOST_ID`
-
-you can pass:
+Fixture replay and live smoke tasks are still available:
 
 ```bash
---bind-env launch_id=APP_LAUNCH_ID \
---bind-env app_session_id=APP_SESSION_ID \
---bind-env actor_id=APP_ACTOR_ID \
---bind-env host_id=APP_HOST_ID
-```
-
-You can also attach fixed values:
-
-```bash
---bind-value environment=staging
-```
-
-If you do not pass any `--bind-env` or `--bind-value` flags, the helper emits
-no application-level bindings at all.
-
-This is the key portability rule for the repository: the runtime layer speaks a
-generic contract, and your application decides what each binding means.
-
----
-
-![How it works](assets/header-architecture.svg)
-
-![Architecture overview](assets/architecture.svg)
-
-The runtime flow is deliberately simple:
-
-1. A runtime hook, plugin, or extension fires.
-2. The runtime invokes `agent_harness`.
-3. The helper reads the incoming payload, maps it to the shared contract, and
-   appends any requested bindings.
-4. The helper writes the event to a local receiver or to `stdout`.
-5. Your application consumes that stream and derives higher-level state.
-
-That design keeps the helper as a deep module with a simple interface. The
-runtime-specific translation logic lives in one place, while application logic
-stays outside the repository.
-
----
-
-![Debug mode](assets/header-debug.svg)
-
-The repository supports two operating modes.
-
-Product mode is the real integration path. Your application launches the
-runtime, injects any binding environment variables it wants to expose, and
-points the helper at a local receiver through `--socket-path` or
-`--socket-env`.
-
-Debug mode is intentionally explicit. It is there to help you verify what a
-runtime is sending and how the helper is translating it. The simplest path is:
-
-```bash
-mise run diag:listen
-```
-
-In another terminal, run a live scenario:
-
-```bash
+mise run diag:fixtures:all
 mise run diag:codex:smoke
 mise run diag:gemini:bash
 mise run diag:claude:approval
+mise run diag:opencode:approval
+mise run diag:pi:smoke
 ```
 
-The Go `agent_harness run` command starts a listener, sets
-`AGENT_HARNESS_SOCKET`, launches the runtime in an approval-capable mode, and
-prints live `[hook]` lines as events arrive.
-
-This repository deliberately keeps approval-sensitive scenarios in place. The
-live diagnostic paths are not YOLO-mode shortcuts because the goal is to verify
-actual runtime behaviour, including approval gates.
+The normalised passive event contract is documented in
+[docs/contract.md](docs/contract.md).
 
 ---
 
 ![Scripts and assets](assets/header-scripts.svg)
 
-The README presentation layer is generated and checked from source. That keeps
-the documentation maintainable rather than turning it into a one-off manual
-layout exercise.
+## Maintenance
 
-The main support tooling is:
+The local automation entrypoints live in [mise.toml](mise.toml), and hook
+checks live in [hk.pkl](hk.pkl).
 
-- [`scripts/generate_assets.py`](./scripts/generate_assets.py) generates the
-  banner and section headers used by the README.
-- [`scripts/validate_readme.py`](./scripts/validate_readme.py) verifies that
-  the README references the expected assets and local paths.
-- [`cmd/agent-harness/main.go`](./cmd/agent-harness/main.go) also exposes
-  the Go `install`, `uninstall`, and `run` subcommands used for live runtime
-  diagnostics and hook, plugin, or extension bundle management.
-- [`assets/architecture.d2`](./assets/architecture.d2) is the source of truth
-  for the sequence diagram embedded above as
-  [`assets/architecture.svg`](./assets/architecture.svg).
+Useful tasks:
 
-The generated assets live in [`assets/`](./assets). When you change the README
-structure or visual language, regenerate the assets and rerun the README
-validator.
+| Command | Purpose |
+| --- | --- |
+| `mise run build` | Build `agent_harness` and `agent_control`. |
+| `mise run control:serve` | Start the control-plane on `/tmp/agentic-control.sock` unless `SOCKET_PATH` is set. |
+| `mise run validate-docs` | Validate README links and required generated assets. |
+| `mise run generate-assets` | Regenerate README SVG assets and the architecture diagram. |
+| `mise run hk:check` | Run the configured local checks. |
+
+Documentation assets are generated by `scripts/generate_assets.py` and checked
+by `scripts/validate_readme.py`. The generated files are:
+
+- [assets/banner.svg](assets/banner.svg)
+- [assets/header-overview.svg](assets/header-overview.svg)
+- [assets/header-install.svg](assets/header-install.svg)
+- [assets/header-runtimes.svg](assets/header-runtimes.svg)
+- [assets/header-contract.svg](assets/header-contract.svg)
+- [assets/header-bindings.svg](assets/header-bindings.svg)
+- [assets/header-architecture.svg](assets/header-architecture.svg)
+- [assets/header-debug.svg](assets/header-debug.svg)
+- [assets/header-scripts.svg](assets/header-scripts.svg)
+- [assets/header-repository.svg](assets/header-repository.svg)
+- [assets/architecture.svg](assets/architecture.svg)
+
+Regenerate and validate after README structure changes:
 
 ```bash
 mise run generate-assets
@@ -416,25 +447,20 @@ mise run validate-docs
 
 ![Repository layout](assets/header-repository.svg)
 
-The repository is split into a small number of clear modules:
+## Repository Layout
 
 | Path | Purpose |
 | --- | --- |
-| [`cmd/`](./cmd) | Binary entrypoints for the shared helper and control-plane tools. |
-| [`internal/harness/`](./internal/harness) | Shared hook, plugin, and extension translation logic. |
-| [`internal/controlplane/`](./internal/controlplane) | Active-session registry, event bus, server, and provider implementations. |
-| [`pkg/contract/`](./pkg/contract) | Shared Go contract types for harness and control-plane work. |
-| [`pkg/controlplane/`](./pkg/controlplane) | Provider-native control-plane interfaces and request types. |
-| [`runtimes/`](./runtimes) | Runtime-specific fixtures, prompts, plugin source, and notes. |
-| [`docs/`](./docs) | Durable contract and integration documentation. |
-| [`scripts/`](./scripts) | Asset generation and README validation. |
-| [`assets/`](./assets) | Generated README visuals. |
-| [`mise.toml`](./mise.toml) | Local automation entrypoint. |
-| [`hk.pkl`](./hk.pkl) | hk hook and verification configuration. |
+| [cmd/](cmd) | Binary entrypoints for `agent_control` and `agent_harness`. |
+| [internal/controlplane/](internal/controlplane) | Session registry, event bus, RPC server, probes, model catalogue, and provider implementations. |
+| [internal/harness/](internal/harness) | Passive hook, plugin, and extension translation plus bundle install and live-run diagnostics. |
+| [pkg/contract/](pkg/contract) | Public JSON contract types for controlled sessions and passive harness events. |
+| [pkg/controlplane/](pkg/controlplane) | Public Go request types, session helpers, metadata helpers, and text-generation router. |
+| [runtimes/](runtimes) | Runtime-specific fixtures, prompts, plugin source, extension notes, and passive harness README files. |
+| [docs/](docs) | Durable integration, contract, control-plane, and runtime documentation. |
+| [scripts/](scripts) | README asset generation and README validation. |
+| [assets/](assets) | Generated README images and architecture source. |
+| [go.mod](go.mod) | Go module definition. |
 
-## Next steps
-
-If you want to integrate this into another application, start with
-[docs/integration.md](./docs/integration.md), install the runtime bundle you
-need, and decide what your host application wants to bind as `launch_id`,
-`app_session_id`, `actor_id`, and `host_id`.
+For a host integration, wire `system.describe` into your backend picker first,
+then decide whether you need controlled sessions, passive telemetry, or both.
