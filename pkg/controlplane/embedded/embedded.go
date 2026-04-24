@@ -70,3 +70,19 @@ func (c *ControlPlane) StopSession(ctx context.Context, sessionID string) (*cont
 func (c *ControlPlane) ListSessions(ctx context.Context, runtime string) ([]contract.RuntimeSession, error) {
 	return c.service.ListSessions(ctx, runtime)
 }
+
+func (c *ControlPlane) GetTrackedSession(ctx context.Context, sessionID string, providerSessionID string) (*contract.TrackedSession, error) {
+	return c.service.GetTrackedSession(ctx, sessionID, providerSessionID)
+}
+
+func (c *ControlPlane) ListTrackedSessions(ctx context.Context, runtime string) ([]contract.TrackedSession, error) {
+	return c.service.ListTrackedSessions(ctx, runtime)
+}
+
+func (c *ControlPlane) GetThread(ctx context.Context, threadID string, providerSessionID string) (*contract.TrackedThread, error) {
+	return c.service.GetThread(ctx, threadID, providerSessionID)
+}
+
+func (c *ControlPlane) SetThreadMetadata(ctx context.Context, threadID string, metadata contract.ThreadMetadata) error {
+	return c.service.SetThreadMetadata(ctx, threadID, metadata)
+}

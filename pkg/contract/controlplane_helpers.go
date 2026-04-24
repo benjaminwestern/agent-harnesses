@@ -53,6 +53,8 @@ func (session RuntimeSession) State() *SessionState {
 		LastError:    session.LastError,
 		CWD:          session.CWD,
 		Model:        session.Model,
+		Mode:         session.Mode,
+		Usage:        session.Usage,
 		Title:        session.Title,
 	}
 	if *state == (SessionState{}) {

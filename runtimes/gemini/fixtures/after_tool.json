@@ -8,7 +8,7 @@
   "tool_input": {
     "command": "pwd && ls -1 runtimes/gemini"
   },
-  "tool_result": {
+  "tool_response": {
     "returnDisplay": "/workspace/agentic-control\nREADME.md\nfixtures\ngo.mod\nprompts\n"
   }
 }

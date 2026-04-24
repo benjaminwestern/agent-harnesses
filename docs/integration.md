@@ -32,7 +32,8 @@ This keeps the helper portable and keeps product logic in your app.
 Pick one of these starting points:
 
 - If your app owns sessions, start with `docs/control-plane.md`, run
-  `agent_control serve`, then call `agent_control describe` before you do
+  `agent_control serve`, then `agent_control wait-ready`, then call
+  `agent_control describe` before you do
   anything else.
 - If your app only needs passive runtime events, install the runtime bundle,
   start `agent_harness listen`, and launch the runtime with your chosen socket
@@ -67,7 +68,7 @@ management and makes local-only routing straightforward.
 
 For manual debugging, you can also emit normalised events directly to stdout.
 
-If your app already has its own receiver lifecycle, prefer `--socket-path` and
+If your app has its own receiver lifecycle, prefer `--socket-path` and
 own the path directly. If your app wants to inject the path dynamically per
 launch, use `--socket-env` and set the environment variable at runtime.
 
@@ -79,7 +80,7 @@ keep hook configuration out of any existing user-managed settings file.
 OpenCode is the cleanest plugin-based example. The bundle writes into the
 runtime’s dedicated plugin directory, so the runtime auto-loads the adapter
 without any `opencode.json` edit. When you need tighter control for testing,
-you can still use a repo-local `.opencode/plugins/` directory or override
+you can use a repo-local `.opencode/plugins/` directory or override
 runtime behaviour with `OPENCODE_CONFIG_CONTENT`. If both global and repo-local
 OpenCode bundles are present, the repo-local bundle is the active bundle for
 that repository.
@@ -110,5 +111,5 @@ Keep these responsibilities in your application rather than in the helper:
 - UI state derivation
 - resume heuristics
 
-That split keeps Agentic Control portable across products while still letting
+That split keeps Agentic Control portable across products while letting
 you build a runtime-aware host application around it.

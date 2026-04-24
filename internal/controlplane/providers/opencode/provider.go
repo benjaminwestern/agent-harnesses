@@ -153,15 +153,23 @@ type remoteModelCatalog struct {
 }
 
 type remotePermission struct {
-	ID        string         `json:"id"`
-	Type      string         `json:"type"`
-	Pattern   any            `json:"pattern"`
-	SessionID string         `json:"sessionID"`
-	MessageID string         `json:"messageID"`
-	CallID    string         `json:"callID"`
-	Title     string         `json:"title"`
-	Metadata  map[string]any `json:"metadata"`
-	Time      struct {
+	ID         string         `json:"id"`
+	RequestID  string         `json:"requestID"`
+	Type       string         `json:"type"`
+	Pattern    any            `json:"pattern"`
+	Patterns   []any          `json:"patterns"`
+	Always     bool           `json:"always"`
+	SessionID  string         `json:"sessionID"`
+	MessageID  string         `json:"messageID"`
+	CallID     string         `json:"callID"`
+	Title      string         `json:"title"`
+	Metadata   map[string]any `json:"metadata"`
+	Permission map[string]any `json:"permission"`
+	Tool       *struct {
+		MessageID string `json:"messageID"`
+		CallID    string `json:"callID"`
+	} `json:"tool,omitempty"`
+	Time struct {
 		Created int64 `json:"created"`
 	} `json:"time"`
 }
@@ -169,7 +177,9 @@ type remotePermission struct {
 type remotePermissionReply struct {
 	SessionID    string `json:"sessionID"`
 	PermissionID string `json:"permissionID"`
+	RequestID    string `json:"requestID"`
 	Response     string `json:"response"`
+	Reply        string `json:"reply"`
 }
 
 type remoteQuestionRequest struct {
@@ -218,14 +228,27 @@ type remoteMessageRecord struct {
 }
 
 type remoteMessage struct {
-	ID         string               `json:"id"`
-	SessionID  string               `json:"sessionID"`
-	Role       string               `json:"role"`
-	ParentID   string               `json:"parentID"`
-	ModelID    string               `json:"modelID"`
-	ProviderID string               `json:"providerID"`
-	Error      *remoteProviderError `json:"error,omitempty"`
-	Time       struct {
+	ID         string  `json:"id"`
+	SessionID  string  `json:"sessionID"`
+	Role       string  `json:"role"`
+	ParentID   string  `json:"parentID"`
+	Mode       string  `json:"mode,omitempty"`
+	Agent      string  `json:"agent,omitempty"`
+	ModelID    string  `json:"modelID"`
+	ProviderID string  `json:"providerID"`
+	Cost       float64 `json:"cost,omitempty"`
+	Tokens     struct {
+		Total     int64 `json:"total"`
+		Input     int64 `json:"input"`
+		Output    int64 `json:"output"`
+		Reasoning int64 `json:"reasoning"`
+		Cache     struct {
+			Read  int64 `json:"read"`
+			Write int64 `json:"write"`
+		} `json:"cache"`
+	} `json:"tokens,omitempty"`
+	Error *remoteProviderError `json:"error,omitempty"`
+	Time  struct {
 		Created   int64 `json:"created"`
 		Completed int64 `json:"completed,omitempty"`
 	} `json:"time"`
@@ -701,7 +724,16 @@ func (p *Provider) Respond(
 		return nil, err
 	}
 	if err := p.doJSON(ctx, http.MethodPost, path, sess.cwdSnapshot(), payload, nil); err != nil {
-		return nil, err
+		if !isPermissionRequestKind(pending.Request.Kind) {
+			return nil, err
+		}
+		fallbackPayload, fallbackPath, fallbackErr := legacyPermissionResponsePayload(sess, request, responseSummary)
+		if fallbackErr != nil {
+			return nil, err
+		}
+		if fallbackPostErr := p.doJSON(ctx, http.MethodPost, fallbackPath, sess.cwdSnapshot(), fallbackPayload, nil); fallbackPostErr != nil {
+			return nil, err
+		}
 	}
 
 	sess.removePendingRequest(request.RequestID)
@@ -1388,14 +1420,17 @@ func (p *Provider) handlePermissionUpdated(permission remotePermission) {
 	if !ok {
 		return
 	}
-	if _, exists := sess.pendingRequest(permission.ID); exists {
+	requestID := permission.requestID()
+	if _, exists := sess.pendingRequest(requestID); exists {
 		return
 	}
 
-	turnID := sess.canonicalTurnID(permission.MessageID)
+	messageID := permission.messageID()
+	callID := permission.callID()
+	turnID := sess.canonicalTurnID(messageID)
 	pending := contract.PendingRequest{
 		SchemaVersion: contract.ControlPlaneSchemaVersion,
-		RequestID:     permission.ID,
+		RequestID:     requestID,
 		SessionID:     sess.appSessionID,
 		Runtime:       runtimeName,
 		Kind:          requestKindFromPermission(permission.Type),
@@ -1408,10 +1443,11 @@ func (p *Provider) handlePermissionUpdated(permission remotePermission) {
 		Options:       requestOptionsForPermission(),
 		Extensions: map[string]any{
 			"permission_type": permission.Type,
-			"pattern":         patternSlice(permission.Pattern),
+			"pattern":         permission.patterns(),
+			"always":          permission.Always,
 			"metadata":        permission.Metadata,
-			"message_id":      permission.MessageID,
-			"call_id":         permission.CallID,
+			"message_id":      messageID,
+			"call_id":         callID,
 		},
 	}
 
@@ -1423,7 +1459,7 @@ func (p *Provider) handlePermissionUpdated(permission remotePermission) {
 		map[string]any{
 			"status":          string(sess.statusSnapshot()),
 			"permission_type": permission.Type,
-			"pattern":         patternSlice(permission.Pattern),
+			"pattern":         permission.patterns(),
 			"metadata":        permission.Metadata,
 		},
 	)
@@ -1437,23 +1473,25 @@ func (p *Provider) handlePermissionReplied(reply remotePermissionReply) {
 	if !ok {
 		return
 	}
-	pending, exists := sess.pendingRequest(reply.PermissionID)
+	requestID := coalesce(reply.RequestID, reply.PermissionID)
+	response := coalesce(reply.Reply, reply.Response)
+	pending, exists := sess.pendingRequest(requestID)
 	if !exists {
 		return
 	}
 
-	sess.removePendingRequest(reply.PermissionID)
+	sess.removePendingRequest(requestID)
 	status := nextPendingStatus(sess)
 	sess.setStatus(status)
 
 	event := p.newEvent(sess, "request.responded", pending.Request.NativeMethod, pending.Request.TurnID,
-		fmt.Sprintf("OpenCode permission answered: %s", reply.Response),
+		fmt.Sprintf("OpenCode permission answered: %s", response),
 		map[string]any{
 			"status":   string(status),
-			"response": reply.Response,
+			"response": response,
 		},
 	)
-	event.RequestID = reply.PermissionID
+	event.RequestID = requestID
 	responded := pending.Request
 	responded.Status = contract.RequestStatusResponded
 	event.Request = &responded
@@ -1586,6 +1624,12 @@ func (p *Provider) handleMessageUpdated(message remoteMessage) {
 		if sess.activeTurnIDSnapshot() == "" && turnID != "" {
 			sess.setActiveTurnID(turnID)
 		}
+		if usagePayload := openCodeUsagePayloadFromMessage(message); usagePayload != nil {
+			p.emit(p.newEvent(sess, contract.EventThreadTokenUsageUpdated, "message.updated", turnID,
+				"OpenCode token usage updated",
+				usagePayload,
+			))
+		}
 		if message.Time.Completed > 0 {
 			p.completeTurnFromAssistantMessage(sess, turnID)
 		}
@@ -1632,11 +1676,11 @@ func (p *Provider) handleMessagePartUpdated(update remotePartEnvelope) {
 			return
 		}
 		sess.setAssistantSummary(text)
-		p.emit(p.newEvent(sess, "assistant.message.delta", "message.part.updated", turnID,
+		p.emit(p.newEvent(sess, "assistant.message.updated", "message.part.updated", turnID,
 			truncate(text, 160),
 			map[string]any{
-				"delta": text,
-				"part":  update.Part,
+				"text": text,
+				"part": update.Part,
 			},
 		))
 	case "tool":
@@ -1675,11 +1719,13 @@ func (p *Provider) completeTurnFromAssistantMessageNow(sess *session, turnID str
 	sess.setStatus(contract.SessionIdle)
 	sess.clearPendingRequests()
 	summary := "OpenCode turn completed"
+	payload := map[string]any{"status": string(contract.SessionIdle)}
 	if text := sess.assistantSummarySnapshot(); text != "" {
 		summary = fmt.Sprintf("OpenCode turn completed: %s", text)
+		payload["final_text"] = text
 	}
 	p.emit(p.newEvent(sess, "turn.completed", "message.updated", turnID, summary,
-		map[string]any{"status": string(contract.SessionIdle)},
+		payload,
 	))
 }
 
@@ -2034,14 +2080,16 @@ func (p *Provider) reconcileSessionAfterReconnect(
 	sess.setStatus(contract.SessionIdle)
 	p.resolvePendingRequests(sess, "session.status.recovered", "completed")
 	summary := "Recovered OpenCode turn after event stream reconnect"
+	payload := map[string]any{
+		"status":    string(contract.SessionIdle),
+		"recovered": true,
+	}
 	if text := sess.assistantSummarySnapshot(); text != "" {
 		summary = fmt.Sprintf("Recovered OpenCode turn after event stream reconnect: %s", text)
+		payload["final_text"] = text
 	}
 	p.emit(p.newEvent(sess, "turn.completed", "session.status.recovered", turnID, summary,
-		map[string]any{
-			"status":    string(contract.SessionIdle),
-			"recovered": true,
-		},
+		payload,
 	))
 }
 
@@ -2444,7 +2492,7 @@ func nextPendingStatus(sess *session) contract.SessionStatus {
 }
 
 func requestToolFromPermission(permission remotePermission) *contract.RequestToolContext {
-	patterns := patternSlice(permission.Pattern)
+	patterns := permission.patterns()
 	command := ""
 	if len(patterns) > 0 {
 		command = patterns[0]
@@ -2459,6 +2507,37 @@ func requestToolFromPermission(permission remotePermission) *contract.RequestToo
 		Command:     command,
 		Description: valueAsString(permission.Metadata["description"]),
 	}
+}
+
+func (permission remotePermission) requestID() string {
+	return coalesce(permission.RequestID, permission.ID)
+}
+
+func (permission remotePermission) messageID() string {
+	if permission.Tool != nil && permission.Tool.MessageID != "" {
+		return permission.Tool.MessageID
+	}
+	return permission.MessageID
+}
+
+func (permission remotePermission) callID() string {
+	if permission.Tool != nil && permission.Tool.CallID != "" {
+		return permission.Tool.CallID
+	}
+	return permission.CallID
+}
+
+func (permission remotePermission) patterns() []string {
+	if len(permission.Patterns) > 0 {
+		result := make([]string, 0, len(permission.Patterns))
+		for _, pattern := range permission.Patterns {
+			if text := valueAsString(pattern); text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	}
+	return patternSlice(permission.Pattern)
 }
 
 func requestOptionsForPermission() []contract.RequestOption {
@@ -2528,9 +2607,8 @@ func responsePayload(
 		if err != nil {
 			return nil, "", nil, err
 		}
-		return map[string]any{"response": response}, fmt.Sprintf(
-			"/session/%s/permissions/%s",
-			url.PathEscape(sess.providerSessionIDSnapshot()),
+		return map[string]any{"reply": response}, fmt.Sprintf(
+			"/permission/%s/reply",
 			url.PathEscape(request.RequestID),
 		), response, nil
 	case contract.RequestUserInputTool, contract.RequestUserInputMCP:
@@ -2545,6 +2623,30 @@ func responsePayload(
 		return map[string]any{"answers": answers}, fmt.Sprintf("/question/%s/reply", url.PathEscape(request.RequestID)), answers, nil
 	default:
 		return nil, "", nil, fmt.Errorf("unsupported OpenCode request kind: %s", pending.Request.Kind)
+	}
+}
+
+func legacyPermissionResponsePayload(
+	sess *session,
+	request api.RespondRequest,
+	response any,
+) (map[string]any, string, error) {
+	if _, ok := response.(string); !ok {
+		return nil, "", errors.New("legacy OpenCode permission response requires string response")
+	}
+	return map[string]any{"response": response}, fmt.Sprintf(
+		"/session/%s/permissions/%s",
+		url.PathEscape(sess.providerSessionIDSnapshot()),
+		url.PathEscape(request.RequestID),
+	), nil
+}
+
+func isPermissionRequestKind(kind contract.RequestKind) bool {
+	switch kind {
+	case contract.RequestApprovalTool, contract.RequestApprovalCommand, contract.RequestApprovalFileChange, contract.RequestApprovalPermissions:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -2910,6 +3012,24 @@ func defaultOpenCodeVariant(providerID string, values []string) string {
 		return firstMatchingVariant(values, "medium", "high", "default")
 	default:
 		return firstMatchingVariant(values, "default", "medium", "high")
+	}
+}
+
+func openCodeUsagePayloadFromMessage(message remoteMessage) map[string]any {
+	if message.Tokens.Total == 0 && message.Tokens.Input == 0 && message.Tokens.Output == 0 && message.Tokens.Reasoning == 0 && message.Tokens.Cache.Read == 0 {
+		return nil
+	}
+	return map[string]any{
+		"usage": map[string]any{
+			"total_tokens":     message.Tokens.Total,
+			"input_tokens":     message.Tokens.Input,
+			"output_tokens":    message.Tokens.Output,
+			"reasoning_tokens": message.Tokens.Reasoning,
+			"cached_tokens":    message.Tokens.Cache.Read,
+		},
+		"cost":        message.Cost,
+		"provider_id": message.ProviderID,
+		"model_id":    message.ModelID,
 	}
 }
 

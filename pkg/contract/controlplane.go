@@ -129,6 +129,18 @@ type SystemDescriptor struct {
 	WireProtocolVersion string              `json:"wire_protocol_version"`
 	Methods             []string            `json:"methods"`
 	Runtimes            []RuntimeDescriptor `json:"runtimes"`
+	Interaction         *InteractionStatus  `json:"interaction,omitempty"`
+}
+
+type InteractionStatus struct {
+	SchemaVersion string          `json:"schema_version,omitempty"`
+	Service       string          `json:"service,omitempty"`
+	Endpoint      string          `json:"endpoint,omitempty"`
+	Transport     string          `json:"transport,omitempty"`
+	Available     bool            `json:"available"`
+	Methods       []string        `json:"methods,omitempty"`
+	Capabilities  map[string]bool `json:"capabilities,omitempty"`
+	LastError     string          `json:"last_error,omitempty"`
 }
 
 type AuthProbe struct {
@@ -186,6 +198,9 @@ type SessionState struct {
 	LastError    string        `json:"last_error,omitempty"`
 	CWD          string        `json:"cwd,omitempty"`
 	Model        string        `json:"model,omitempty"`
+	Mode         string        `json:"mode,omitempty"`
+	Usage        TokenUsage    `json:"usage,omitempty"`
+	CostUSD      float64       `json:"cost_usd,omitempty"`
 	Title        string        `json:"title,omitempty"`
 }
 
@@ -200,12 +215,36 @@ type RuntimeSession struct {
 	ActiveTurnID      string         `json:"active_turn_id,omitempty"`
 	CWD               string         `json:"cwd,omitempty"`
 	Model             string         `json:"model,omitempty"`
+	Mode              string         `json:"mode,omitempty"`
+	Usage             TokenUsage     `json:"usage,omitempty"`
+	CostUSD           float64        `json:"cost_usd,omitempty"`
 	Title             string         `json:"title,omitempty"`
 	CreatedAtMS       int64          `json:"created_at_ms"`
 	UpdatedAtMS       int64          `json:"updated_at_ms"`
 	LastActivityAtMS  int64          `json:"last_activity_at_ms,omitempty"`
 	LastError         string         `json:"last_error,omitempty"`
 	Metadata          map[string]any `json:"metadata,omitempty"`
+}
+
+type TokenUsageBreakdown struct {
+	Key   string     `json:"key"`
+	Usage TokenUsage `json:"usage"`
+}
+
+type CostBreakdown struct {
+	Key     string  `json:"key"`
+	CostUSD float64 `json:"cost_usd"`
+}
+
+type TrackedSession struct {
+	Session       RuntimeSession        `json:"session"`
+	StartedAtMS   int64                 `json:"started_at_ms,omitempty"`
+	EndedAtMS     int64                 `json:"ended_at_ms,omitempty"`
+	LastEventType string                `json:"last_event_type,omitempty"`
+	UsageByModel  []TokenUsageBreakdown `json:"usage_by_model,omitempty"`
+	UsageByMode   []TokenUsageBreakdown `json:"usage_by_mode,omitempty"`
+	CostByModel   []CostBreakdown       `json:"cost_by_model,omitempty"`
+	CostByMode    []CostBreakdown       `json:"cost_by_mode,omitempty"`
 }
 
 type PendingRequest struct {

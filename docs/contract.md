@@ -87,8 +87,8 @@ families are:
 - `notification`
 - `runtime.event`
 
-Runtimes can emit richer native events than the normalised contract exposes
-today. In that case, the native event name is still preserved so you can extend
+Runtimes can emit richer native events than the normalised contract exposes.
+In that case, the native event name is preserved so you can extend
 your app-side policy without waiting for a schema rewrite.
 
 ## Example

@@ -73,10 +73,12 @@ type CodexHookPayload struct {
 	Model          *string     `json:"model"`
 	Source         *string     `json:"source"`
 	TurnID         *string     `json:"turn_id"`
+	Prompt         *string     `json:"prompt"`
 	UserPrompt     *string     `json:"user_prompt"`
 	ToolName       *string     `json:"tool_name"`
 	ToolUseID      *string     `json:"tool_use_id"`
 	ToolInput      *ToolInput  `json:"tool_input"`
+	ToolResponse   *ToolOutput `json:"tool_response"`
 	ToolOutput     *ToolOutput `json:"tool_output"`
 	StopHookActive *bool       `json:"stop_hook_active"`
 }
@@ -365,9 +367,14 @@ func normalizeCodexPayload(provenance string, payload []byte) (*contract.Harness
 	}
 
 	var exitCode *int
-	if decoded.ToolOutput != nil {
-		exitCode = decoded.ToolOutput.ExitCode
+	toolOutput := decoded.ToolResponse
+	if toolOutput == nil {
+		toolOutput = decoded.ToolOutput
 	}
+	if toolOutput != nil {
+		exitCode = toolOutput.ExitCode
+	}
+	prompt := firstNonNilString(decoded.Prompt, decoded.UserPrompt)
 
 	return &contract.HarnessEvent{
 		SchemaVersion:   contract.HarnessSchemaVersion,
@@ -382,7 +389,7 @@ func normalizeCodexPayload(provenance string, payload []byte) (*contract.Harness
 		ToolCallID:      decoded.ToolUseID,
 		ToolName:        decoded.ToolName,
 		Command:         command,
-		PromptText:      decoded.UserPrompt,
+		PromptText:      prompt,
 		CWD:             decoded.CWD,
 		Model:           decoded.Model,
 		TranscriptPath:  decoded.TranscriptPath,
@@ -404,6 +411,9 @@ func normalizeGeminiPayload(provenance string, payload []byte) (*contract.Harnes
 
 	toolInput := objectFromObject(root, "tool_input")
 	toolOutput := objectFromObject(root, "tool_output")
+	if toolOutput == nil {
+		toolOutput = objectFromObject(root, "tool_response")
+	}
 	if toolOutput == nil {
 		toolOutput = objectFromObject(root, "tool_result")
 	}
@@ -641,6 +651,8 @@ func codexEventType(nativeEventName string) string {
 		return "turn.user_prompt_submitted"
 	case "PreToolUse":
 		return "tool.started"
+	case "PermissionRequest":
+		return "tool.permission_requested"
 	case "PostToolUse":
 		return "tool.finished"
 	case "Stop":
@@ -752,8 +764,8 @@ func codexSummary(nativeEventName string, payload CodexHookPayload) string {
 	case "SessionStart":
 		return fmt.Sprintf("Codex session started via %s", valueOr(payload.Source, "startup"))
 	case "UserPromptSubmit":
-		if payload.UserPrompt != nil {
-			return fmt.Sprintf("User prompt submitted: %s", truncate(*payload.UserPrompt, 120))
+		if prompt := firstNonNilString(payload.Prompt, payload.UserPrompt); prompt != nil {
+			return fmt.Sprintf("User prompt submitted: %s", truncate(*prompt, 120))
 		}
 		return "User prompt submitted"
 	case "PreToolUse":
@@ -761,9 +773,18 @@ func codexSummary(nativeEventName string, payload CodexHookPayload) string {
 			return fmt.Sprintf("About to run Bash: %s", truncate(*payload.ToolInput.Command, 160))
 		}
 		return "About to run Bash"
+	case "PermissionRequest":
+		if payload.ToolInput != nil && payload.ToolInput.Command != nil {
+			return fmt.Sprintf("Codex requested permission for Bash: %s", truncate(*payload.ToolInput.Command, 160))
+		}
+		return "Codex requested tool permission"
 	case "PostToolUse":
-		if payload.ToolOutput != nil && payload.ToolOutput.ExitCode != nil {
-			return fmt.Sprintf("Finished Bash tool with exit code %d", *payload.ToolOutput.ExitCode)
+		toolOutput := payload.ToolResponse
+		if toolOutput == nil {
+			toolOutput = payload.ToolOutput
+		}
+		if toolOutput != nil && toolOutput.ExitCode != nil {
+			return fmt.Sprintf("Finished Bash tool with exit code %d", *toolOutput.ExitCode)
 		}
 		return "Finished Bash tool"
 	case "Stop":
@@ -788,7 +809,7 @@ func geminiSummary(nativeEventName string, root map[string]any) string {
 		}
 		return "Gemini prompt submitted"
 	case "AfterAgent":
-		if response := stringFromObject(root, "response"); response != nil {
+		if response := firstNonNilString(stringFromObject(root, "prompt_response"), stringFromObject(root, "response")); response != nil {
 			return fmt.Sprintf("Gemini agent turn finished: %s", truncate(*response, 120))
 		}
 		return "Gemini agent turn finished"
@@ -802,7 +823,11 @@ func geminiSummary(nativeEventName string, root map[string]any) string {
 		return fmt.Sprintf("Gemini about to run %s", toolName)
 	case "AfterTool":
 		toolName := valueOr(stringFromObject(root, "tool_name"), "tool")
-		if result := objectFromObject(root, "tool_result"); result != nil {
+		result := objectFromObject(root, "tool_response")
+		if result == nil {
+			result = objectFromObject(root, "tool_result")
+		}
+		if result != nil {
 			if content := stringFromObject(result, "llmContent"); content != nil {
 				return fmt.Sprintf("Gemini finished %s: %s", toolName, truncate(*content, 120))
 			}

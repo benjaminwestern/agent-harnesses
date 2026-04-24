@@ -586,10 +586,29 @@ func (s *session) handleNotification(message rpcMessage) {
 			"Codex server request resolved",
 			nil,
 		))
+	case "thread/tokenUsage/updated":
+		var payload map[string]any
+		_ = json.Unmarshal(message.Params, &payload)
+		s.provider.emit(s.provider.newEvent(s, contract.EventThreadTokenUsageUpdated, message.Method, s.turnID(),
+			"Codex thread token usage updated",
+			payload,
+		))
+	case "account/rateLimits/updated":
+		var payload map[string]any
+		_ = json.Unmarshal(message.Params, &payload)
+		s.provider.emit(s.provider.newEvent(s, "account.rate-limits.updated", message.Method, "",
+			"Codex rate limits updated",
+			payload,
+		))
 	default:
+		var payload map[string]any
+		_ = json.Unmarshal(message.Params, &payload)
+		if len(payload) == 0 {
+			payload = nil
+		}
 		s.provider.emit(s.provider.newEvent(s, "runtime.event", message.Method, "",
 			fmt.Sprintf("Codex notification: %s", message.Method),
-			nil,
+			payload,
 		))
 	}
 }

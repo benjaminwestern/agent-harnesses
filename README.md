@@ -10,13 +10,16 @@ It gives upstream services two surfaces:
 - `agent_harness` for passive hook, plugin, and extension telemetry from
   sessions launched outside your app.
 
+It contains Court as an internal subsystem for multi-agent workflow
+orchestration.
+
 For new integrations, start with `agent_control`. It discovers local installs,
 reports auth state, exposes available models where the runtime has a stable
 inventory surface, starts and resumes sessions, sends input, interrupts work,
 answers runtime requests, and streams normalised events.
 
-The passive harness still matters for diagnostics and unmanaged sessions, but
-it is no longer the centre of the repository.
+The passive harness remains available for diagnostics and unmanaged sessions,
+while `agent_control` is the primary integration surface.
 
 ---
 
@@ -27,11 +30,17 @@ it is no longer the centre of the repository.
 Agentic Control keeps runtime-specific behaviour behind a small contract that
 host applications can import or run over a Unix socket.
 
+It is the native home for workflow orchestration primitives, with Court as the
+advanced review-oriented subsystem on top.
+
 | Need | Use | Primary files |
 | --- | --- | --- |
 | Discover installed runtimes, auth, capabilities, and models | `agent_control describe` or `embedded.ControlPlane.Describe()` | [`cmd/agent-control/main.go`](cmd/agent-control/main.go), [`pkg/controlplane/embedded/embedded.go`](pkg/controlplane/embedded/embedded.go) |
 | Start, resume, send to, interrupt, respond to, stop, and list sessions | `agent_control serve` or `embedded.ControlPlane` | [`internal/controlplane/`](internal/controlplane), [`pkg/controlplane/types.go`](pkg/controlplane/types.go) |
+| Track downstream session history and token economics | control-plane session ledger | [`internal/controlplane/sessionledger.go`](internal/controlplane/sessionledger.go), [`docs/session-ledger.md`](docs/session-ledger.md) |
+| Own backend/provider/model definitions and validation | shared runtime target helpers | [`pkg/controlplane/runtime_targets.go`](pkg/controlplane/runtime_targets.go), [`docs/model-registry.md`](docs/model-registry.md) |
 | Route model-backed text generation work in upstream services | `pkg/controlplane.TextGenerationRouter` | [`pkg/controlplane/textgen.go`](pkg/controlplane/textgen.go) |
+| Run Court workflow orchestration in process | `internal/court` | [`internal/court/`](internal/court), [`docs/court-subsystem.md`](docs/court-subsystem.md) |
 | Capture unmanaged runtime telemetry | `agent_harness install`, `agent_harness listen`, and runtime bundles | [`cmd/agent-harness/main.go`](cmd/agent-harness/main.go), [`internal/harness/harness.go`](internal/harness/harness.go), [`internal/harness/install.go`](internal/harness/install.go), [`internal/harness/run.go`](internal/harness/run.go) |
 | Consume stable JSON contracts | Go contract types | [`pkg/contract/controlplane.go`](pkg/contract/controlplane.go), [`pkg/contract/harness.go`](pkg/contract/harness.go) |
 
@@ -52,6 +61,16 @@ Read these next:
 
 - [Control-plane guide](docs/control-plane.md) for `system.describe`, session
   RPC, local probes, auth state, and model inventory.
+- [Session ledger](docs/session-ledger.md) for downstream session tracking and
+  token economics.
+- [Model registry](docs/model-registry.md) for unified backend/provider/model
+  sourcing, validation, and operator surfaces.
+- [Smoke testing](docs/smoke-testing.md) for repeatable live runtime/orchestration
+  verification through the CLI.
+- [Orchestration surface](docs/orchestration-surface.md) for the first native
+  non-Court workflow entry point.
+- [Court subsystem](docs/court-subsystem.md) for the in-process workflow engine
+  layering inside Agentic Control.
 - [Integration guide](docs/integration.md) for embedding Agentic Control into a
   host service.
 - [Event contract](docs/contract.md) for the passive harness event shape.
@@ -75,13 +94,14 @@ mise run build
 Start the control-plane:
 
 ```bash
-.artifacts/bin/agent_control serve --socket-path /tmp/agentic-control.sock
+agent_control serve --socket-path /tmp/agentic-control.sock
+agent_control wait-ready --socket-path /tmp/agentic-control.sock
 ```
 
 In another terminal, ask it what the local machine can run:
 
 ```bash
-.artifacts/bin/agent_control describe --socket-path /tmp/agentic-control.sock
+agent_control describe --socket-path /tmp/agentic-control.sock
 ```
 
 That call is the first useful integration point. It returns:
@@ -93,6 +113,14 @@ That call is the first useful integration point. It returns:
 - runtime version and resolved binary path
 - auth state where a runtime exposes a usable status command
 - model inventory and model option metadata where the runtime exposes it
+
+For typed model selection and orchestration, the most useful next commands are:
+
+```bash
+agent_control models --socket-path /tmp/agentic-control.sock --runtime opencode --provider google
+agent_control smoke --socket-path /tmp/agentic-control.sock
+agent_control court run --socket-path /tmp/agentic-control.sock --task "review this repo" --provider opencode --model-selection google/gemini-3-flash-preview --workspace . --watch
+```
 
 The same control-plane can be imported directly from Go:
 
@@ -130,16 +158,16 @@ inventory.
 
 ## Runtime Matrix
 
-The current release was validated on April 19, 2026 against these local CLI
+The release was checked on April 24, 2026 against these CLI/package
 versions:
 
 | Runtime | Validated version | Controlled session transport | Passive telemetry | Model inventory |
 | --- | --- | --- | --- | --- |
-| Codex | `codex-cli 0.121.0` | `codex app-server` | native hooks | built-in catalogue |
-| Gemini | `0.38.2` | `gemini --acp` | native hooks | built-in catalogue |
-| Claude | `2.1.98 (Claude Code)` | Claude Agent SDK bridge | native hooks | built-in catalogue |
-| OpenCode | `1.14.17` | `opencode serve` | native plugin | dynamic `/provider` inventory when the server exposes it |
-| pi | `0.67.68` | `pi --mode rpc` | native extension | gap: no stable documented JSON/RPC model inventory contract |
+| Codex | `codex-cli 0.124.0` | `codex app-server` | native hooks | built-in catalogue; app-server `model/list` pending |
+| Gemini | `0.39.0` via package version check; local smoke `0.38.2` | `gemini --acp` | native hooks | built-in catalogue |
+| Claude | `2.1.104 (Claude Code)` local CLI; Agent SDK `0.2.119` package | Claude Agent SDK bridge | native hooks | built-in catalogue |
+| OpenCode | `1.14.22` via package version check; local CLI `1.14.20` | `opencode serve` | native plugin | dynamic `/provider` inventory when the server exposes it |
+| pi | `0.70.0` via package version check; local CLI `0.68.0` | `pi --mode rpc` | native extension | dynamic RPC `get_available_models` pending |
 
 Install references:
 
@@ -151,12 +179,10 @@ Install references:
 | OpenCode | [OpenCode install guide](https://opencode.ai/docs/) | [OpenCode plugins](https://opencode.ai/docs/plugins/), [OpenCode config](https://opencode.ai/docs/config/), [OpenCode permissions](https://opencode.ai/docs/permissions/), [OpenCode server](https://opencode.ai/docs/server/) |
 | pi | [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) | [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md), [pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md) |
 
-The pi model inventory gap is intentional in the API. pi has model registry
-behaviour and a CLI-facing model list path, but the current public docs do not
-define a stable machine-readable inventory contract that matches Codex,
-Gemini, Claude, or OpenCode. Until that exists, `system.describe` reports pi
-install and version state with `model_source: "runtime_default"` and an empty
-`models` list.
+pi documents a machine-readable RPC model inventory path through
+`get_available_models`. Agentic Control reports pi install and version
+state with an empty built-in model list until that RPC probe is implemented
+and smoke-tested against the `0.70.0` package.
 
 ---
 
@@ -216,7 +242,7 @@ Response shape:
       "probe": {
         "installed": true,
         "status": "ready",
-        "version": "codex-cli 0.121.0",
+        "version": "codex-cli 0.124.0",
         "binary_path": "/opt/homebrew/bin/codex",
         "auth": {
           "status": "authenticated",
@@ -388,7 +414,7 @@ Remove only Agentic Control-managed config later:
 .artifacts/bin/agent_harness uninstall --runtime pi --scope repo
 ```
 
-Fixture replay and live smoke tasks are still available:
+Fixture replay and live smoke tasks:
 
 ```bash
 mise run diag:fixtures:all

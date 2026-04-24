@@ -3,6 +3,7 @@ package contract
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -110,6 +111,9 @@ func EventDeltaText(event RuntimeEvent) string {
 	if event.EventType != EventAssistantMessageDelta {
 		return ""
 	}
+	if event.NativeEventName == "message.part.updated" {
+		return ""
+	}
 	if event.Payload == nil {
 		return ""
 	}
@@ -140,6 +144,193 @@ func EventErrorText(event RuntimeEvent) string {
 		EventPayloadString(event, "error"),
 		event.Summary,
 	)
+}
+
+func EventMode(event RuntimeEvent) string {
+	if event.SessionState != nil && strings.TrimSpace(event.SessionState.Mode) != "" {
+		return strings.TrimSpace(event.SessionState.Mode)
+	}
+	return firstNonEmpty(
+		EventPayloadString(event, "mode"),
+		EventPayloadString(event, "current_mode"),
+		EventPayloadString(event, "current_mode_id"),
+	)
+}
+
+func EventTokenUsage(event RuntimeEvent) (TokenUsage, bool) {
+	if event.SessionState != nil {
+		if usage, ok := tokenUsageIfSet(event.SessionState.Usage); ok {
+			return usage, true
+		}
+	}
+	if usage, ok := tokenUsageFromValue(event.Payload["usage"]); ok {
+		return usage, true
+	}
+	if usage, ok := tokenUsageFromValue(event.Payload["token_count"]); ok {
+		return usage, true
+	}
+	if usage, ok := tokenUsageFromPath(event.Payload, "meta", "quota", "token_count"); ok {
+		return usage, true
+	}
+	if usage, ok := tokenUsageFromPath(event.Payload, "meta", "token_count"); ok {
+		return usage, true
+	}
+	if usage, ok := tokenUsageFromPath(event.Payload, "tokenUsage", "total"); ok {
+		return usage, true
+	}
+	if usage, ok := tokenUsageFromPath(event.Payload, "tokenUsage", "last"); ok {
+		return usage, true
+	}
+	return tokenUsageFromValue(event.Payload)
+}
+
+func EventCostUSD(event RuntimeEvent) (float64, bool) {
+	if event.SessionState != nil && event.SessionState.CostUSD > 0 {
+		return event.SessionState.CostUSD, true
+	}
+	if cost, ok := float64Value(event.Payload["cost"]); ok {
+		return cost, true
+	}
+	if cost, ok := float64Value(event.Payload["cost_usd"]); ok {
+		return cost, true
+	}
+	if cost, ok := float64ValueFromPath(event.Payload, "meta", "quota", "cost"); ok {
+		return cost, true
+	}
+	if cost, ok := float64ValueFromPath(event.Payload, "meta", "cost"); ok {
+		return cost, true
+	}
+	return 0, false
+}
+
+func tokenUsageFromPath(root map[string]any, keys ...string) (TokenUsage, bool) {
+	var current any = root
+	for _, key := range keys {
+		values, ok := current.(map[string]any)
+		if !ok {
+			return TokenUsage{}, false
+		}
+		current = values[key]
+	}
+	return tokenUsageFromValue(current)
+}
+
+func float64ValueFromPath(root map[string]any, keys ...string) (float64, bool) {
+	var current any = root
+	for _, key := range keys {
+		values, ok := current.(map[string]any)
+		if !ok {
+			return 0, false
+		}
+		current = values[key]
+	}
+	return float64Value(current)
+}
+
+func tokenUsageIfSet(usage TokenUsage) (TokenUsage, bool) {
+	if usage != (TokenUsage{}) {
+		return usage, true
+	}
+	return TokenUsage{}, false
+}
+
+func tokenUsageFromValue(value any) (TokenUsage, bool) {
+	if value == nil {
+		return TokenUsage{}, false
+	}
+	if usage, ok := value.(TokenUsage); ok {
+		return tokenUsageIfSet(usage)
+	}
+	values, ok := value.(map[string]any)
+	if !ok {
+		return TokenUsage{}, false
+	}
+	var usage TokenUsage
+	seen := false
+	if usage.InputTokens, ok = int64Value(values["input_tokens"]); ok {
+		seen = true
+	} else if usage.InputTokens, ok = int64Value(values["inputTokens"]); ok {
+		seen = true
+	}
+	if usage.OutputTokens, ok = int64Value(values["output_tokens"]); ok {
+		seen = true
+	} else if usage.OutputTokens, ok = int64Value(values["outputTokens"]); ok {
+		seen = true
+	}
+	if usage.ReasoningTokens, ok = int64Value(values["reasoning_tokens"]); ok {
+		seen = true
+	} else if usage.ReasoningTokens, ok = int64Value(values["reasoningOutputTokens"]); ok {
+		seen = true
+	}
+	if usage.CachedTokens, ok = int64Value(values["cached_tokens"]); ok {
+		seen = true
+	} else if usage.CachedTokens, ok = int64Value(values["cachedInputTokens"]); ok {
+		seen = true
+	}
+	if usage.TotalTokens, ok = int64Value(values["total_tokens"]); ok {
+		seen = true
+	} else if usage.TotalTokens, ok = int64Value(values["totalTokens"]); ok {
+		seen = true
+	}
+	if !seen {
+		if used, ok := int64Value(values["used"]); ok {
+			usage.TotalTokens = used
+			seen = true
+		}
+	}
+	if !seen {
+		return TokenUsage{}, false
+	}
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens + usage.ReasoningTokens
+	}
+	return usage, true
+}
+
+func int64Value(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int32:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float32:
+		return int64(typed), true
+	case float64:
+		return int64(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func float64Value(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float32:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	case int:
+		return float64(typed), true
+	case int32:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func firstNonEmpty(values ...string) string {

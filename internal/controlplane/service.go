@@ -5,31 +5,52 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
+	interactionrpc "github.com/benjaminwestern/agentic-control/pkg/interaction"
 )
 
 type Service struct {
-	mu             sync.RWMutex
-	providers      map[string]api.Provider
-	sessionRuntime map[string]string
-	directory      *SessionDirectory
-	events         *EventBus
-	operationLocks map[string]*sync.Mutex
-	locksMu        sync.Mutex
-	eventLogger    *EventLogger
+	mu               sync.RWMutex
+	providers        map[string]api.Provider
+	sessionRuntime   map[string]string
+	directory        *SessionDirectory
+	ledger           *SessionLedger
+	events           *EventBus
+	interaction      *interactionrpc.Client
+	attention        *AttentionQueue
+	interactionSubs  map[string]nativeSubscription
+	operationLocks   map[string]*sync.Mutex
+	locksMu          sync.Mutex
+	interactionSubMu sync.Mutex
+	eventLogger      *EventLogger
+	threads          *ThreadStore
+	sttMu            sync.Mutex
+	sttSubscription  *interactionrpc.Subscription
+	sttRoute         speechRouteConfig
+	speechResponseMu sync.Mutex
+	speechResponses  map[string]*speechResponseTurn
 }
 
 func NewService(providers ...api.Provider) *Service {
 	service := &Service{
-		providers:      make(map[string]api.Provider),
-		sessionRuntime: make(map[string]string),
-		directory:      NewSessionDirectory(),
-		events:         NewEventBus(),
-		operationLocks: make(map[string]*sync.Mutex),
+		providers:       make(map[string]api.Provider),
+		sessionRuntime:  make(map[string]string),
+		directory:       NewSessionDirectory(),
+		ledger:          NewSessionLedger(),
+		events:          NewEventBus(),
+		interaction:     interactionrpc.NewClientFromEnv(),
+		attention:       NewAttentionQueue(),
+		interactionSubs: make(map[string]nativeSubscription),
+		operationLocks:  make(map[string]*sync.Mutex),
+		speechResponses: make(map[string]*speechResponseTurn),
+	}
+	if store, err := NewThreadStoreFromEnv(); err == nil {
+		service.threads = store
 	}
 	if logger, err := NewEventLoggerFromEnv(); err == nil {
 		service.eventLogger = logger
@@ -45,12 +66,20 @@ func (s *Service) PublishEvent(event contract.RuntimeEvent) {
 		_ = s.eventLogger.Write(event)
 	}
 	s.directory.UpdateFromEvent(event)
+	s.ledger.UpdateFromEvent(event)
+	if s.threads != nil {
+		if tracked, ok := s.ledger.Get(event.SessionID, event.ProviderSessionID); ok {
+			_ = s.threads.UpsertTrackedSession(context.Background(), tracked)
+		}
+		_ = s.threads.AddEvent(context.Background(), event)
+	}
 	if event.EventType == "session.stopped" || event.EventType == "session.errored" {
 		s.mu.Lock()
 		delete(s.sessionRuntime, event.SessionID)
 		s.mu.Unlock()
 	}
 	s.events.Publish(event)
+	s.handleSpeechResponseEvent(event)
 }
 
 func (s *Service) SubscribeEvents(buffer int) (<-chan contract.RuntimeEvent, func()) {
@@ -82,17 +111,66 @@ func (s *Service) Describe() contract.SystemDescriptor {
 		Methods: []string{
 			"system.ping",
 			"system.describe",
+			"models.list",
+			"thread.list",
+			"thread.get",
+			"thread.archive",
+			"thread.events",
 			"events.subscribe",
 			"events.unsubscribe",
 			"session.start",
 			"session.resume",
 			"session.send",
+			"session.get",
+			"session.history",
 			"session.interrupt",
 			"session.respond",
 			"session.stop",
 			"session.list",
+			"interaction.call",
+			"interaction.subscribe",
+			"interaction.unsubscribe",
+			"speech.tts.enqueue",
+			"speech.tts.cancel",
+			"speech.tts.status",
+			"speech.tts.voices.list",
+			"speech.tts.config.get",
+			"speech.tts.config.set",
+			"speech.stt.start",
+			"speech.stt.stop",
+			"speech.stt.status",
+			"speech.stt.submit",
+			"speech.stt.subscribe",
+			"speech.stt.unsubscribe",
+			"speech.stt.models.list",
+			"speech.stt.model.get",
+			"speech.stt.model.set",
+			"speech.stt.model.download",
+			"app.open",
+			"app.activate",
+			"insert.targets.list",
+			"insert.enqueue",
+			"screen.observe",
+			"screen.click",
+			"attention.enqueue",
+			"attention.list",
+			"attention.update",
 		},
-		Runtimes: descriptors,
+		Runtimes:    descriptors,
+		Interaction: ptrTo(interactionStatus(s.interaction.Describe())),
+	}
+}
+
+func interactionStatus(status interactionrpc.Status) contract.InteractionStatus {
+	return contract.InteractionStatus{
+		SchemaVersion: status.SchemaVersion,
+		Service:       status.Service,
+		Endpoint:      status.Endpoint,
+		Transport:     status.Transport,
+		Available:     status.Available,
+		Methods:       status.Methods,
+		Capabilities:  status.Capabilities,
+		LastError:     status.LastError,
 	}
 }
 
@@ -118,6 +196,7 @@ func (s *Service) StartSession(
 	if err != nil {
 		return nil, err
 	}
+	session.Metadata = mergeSessionMetadata(session.Metadata, request.Metadata)
 	s.rememberSession(*session)
 	return session, nil
 }
@@ -144,6 +223,7 @@ func (s *Service) ResumeSession(
 	if err != nil {
 		return nil, err
 	}
+	session.Metadata = mergeSessionMetadata(session.Metadata, request.Metadata)
 	s.rememberSession(*session)
 	return session, nil
 }
@@ -256,6 +336,194 @@ func (s *Service) ListSessions(
 	return sessions, nil
 }
 
+func (s *Service) GetTrackedSession(
+	ctx context.Context,
+	sessionID string,
+	providerSessionID string,
+) (*contract.TrackedSession, error) {
+	if s.threads != nil {
+		if thread, err := s.threads.GetThread(ctx, sessionID, providerSessionID); err == nil {
+			return &thread.TrackedSession, nil
+		}
+		if sessionID != "" && providerSessionID != "" {
+			if thread, err := s.threads.GetThread(ctx, "", providerSessionID); err == nil {
+				return &thread.TrackedSession, nil
+			}
+		}
+	}
+	if tracked, ok := s.ledger.Get(sessionID, providerSessionID); ok {
+		return &tracked, nil
+	}
+	if _, err := s.ListSessions(ctx, ""); err != nil {
+		return nil, err
+	}
+	if tracked, ok := s.ledger.Get(sessionID, providerSessionID); ok {
+		return &tracked, nil
+	}
+	return nil, errors.New("unknown session")
+}
+
+func (s *Service) ListTrackedSessions(
+	ctx context.Context,
+	runtime string,
+) ([]contract.TrackedSession, error) {
+	if _, err := s.ListSessions(ctx, runtime); err != nil {
+		return nil, err
+	}
+	if s.threads != nil {
+		threads, err := s.threads.ListThreads(ctx, runtime, nil)
+		if err == nil {
+			tracked := make([]contract.TrackedSession, 0, len(threads))
+			for _, thread := range threads {
+				tracked = append(tracked, thread.TrackedSession)
+			}
+			return tracked, nil
+		}
+	}
+	tracked := s.ledger.List()
+	if runtime == "" {
+		return tracked, nil
+	}
+	filtered := make([]contract.TrackedSession, 0, len(tracked))
+	for _, session := range tracked {
+		if session.Session.Runtime == runtime {
+			filtered = append(filtered, session)
+		}
+	}
+	return filtered, nil
+}
+
+func (s *Service) ListThreads(ctx context.Context, runtime string, archived *bool) ([]contract.TrackedThread, error) {
+	if _, err := s.ListSessions(ctx, runtime); err != nil {
+		return nil, err
+	}
+	if s.threads == nil {
+		tracked, err := s.ListTrackedSessions(ctx, runtime)
+		if err != nil {
+			return nil, err
+		}
+		threads := make([]contract.TrackedThread, 0, len(tracked))
+		for _, item := range tracked {
+			threads = append(threads, contract.TrackedThread{ThreadID: item.Session.SessionID, TrackedSession: item})
+		}
+		return threads, nil
+	}
+	return s.threads.ListThreads(ctx, runtime, archived)
+}
+
+func (s *Service) GetThread(ctx context.Context, threadID string, providerSessionID string) (*contract.TrackedThread, error) {
+	if s.threads == nil {
+		tracked, err := s.GetTrackedSession(ctx, threadID, providerSessionID)
+		if err != nil {
+			return nil, err
+		}
+		return &contract.TrackedThread{ThreadID: tracked.Session.SessionID, TrackedSession: *tracked}, nil
+	}
+	thread, err := s.threads.GetThread(ctx, threadID, providerSessionID)
+	if err != nil {
+		if threadID != "" && providerSessionID != "" {
+			if thread, retryErr := s.threads.GetThread(ctx, "", providerSessionID); retryErr == nil {
+				return &thread, nil
+			}
+		}
+		return nil, err
+	}
+	return &thread, nil
+}
+
+func (s *Service) SetThreadArchived(ctx context.Context, threadID string, archived bool) error {
+	if s.threads == nil {
+		return errors.New("thread store unavailable")
+	}
+	return s.threads.SetArchived(ctx, threadID, archived)
+}
+
+func (s *Service) ListThreadEvents(ctx context.Context, threadID string, afterID int64, limit int) ([]contract.ThreadEvent, error) {
+	if s.threads == nil {
+		return nil, errors.New("thread store unavailable")
+	}
+	return s.threads.ListThreadEvents(ctx, threadID, afterID, limit)
+}
+
+func (s *Service) SetThreadName(ctx context.Context, threadID string, name string) error {
+	if s.threads == nil {
+		return errors.New("thread store unavailable")
+	}
+	return s.threads.SetName(ctx, threadID, name)
+}
+
+func (s *Service) SetThreadMetadata(ctx context.Context, threadID string, metadata contract.ThreadMetadata) error {
+	if s.threads == nil {
+		return errors.New("thread store unavailable")
+	}
+	return s.threads.SetMetadata(ctx, threadID, metadata)
+}
+
+func (s *Service) ForkThread(ctx context.Context, threadID string, name string, metadata contract.ThreadMetadata) (*contract.TrackedThread, error) {
+	thread, err := s.GetThread(ctx, threadID, "")
+	if err != nil {
+		return nil, err
+	}
+	if thread.TrackedSession.Session.ProviderSessionID == "" {
+		return nil, errors.New("thread cannot be forked because no provider session id is available")
+	}
+	if s.threads == nil {
+		return nil, errors.New("thread store unavailable")
+	}
+	child, err := s.threads.ForkThread(ctx, thread.ThreadID, newIdentifier("thread"), true)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(name) != "" {
+		_ = s.threads.SetName(ctx, child.ThreadID, name)
+		child.Name = strings.TrimSpace(name)
+	}
+	metadata.ForkedFromThreadID = thread.ThreadID
+	metadata.ForkedFromProviderSessionID = thread.TrackedSession.Session.ProviderSessionID
+	metadata.ForkMode = "logical"
+	_ = s.threads.SetMetadata(ctx, child.ThreadID, metadata)
+	child.Metadata = metadata
+	return &child, nil
+}
+
+func (s *Service) RollbackThread(ctx context.Context, threadID string, turns int) (*contract.TrackedThread, error) {
+	if turns <= 0 {
+		turns = 1
+	}
+	if s.threads == nil {
+		return nil, errors.New("thread store unavailable")
+	}
+	thread, err := s.GetThread(ctx, threadID, "")
+	if err != nil {
+		return nil, err
+	}
+	metadata := thread.Metadata
+	metadata.RollbackMode = "logical"
+	metadata.RollbackTurns = turns
+	metadata.RollbackFromThreadID = thread.ThreadID
+	metadata.RollbackFromProviderSessionID = thread.TrackedSession.Session.ProviderSessionID
+	child, err := s.threads.ForkThread(ctx, thread.ThreadID, newIdentifier("thread"), false)
+	if err != nil {
+		return nil, err
+	}
+	name := thread.Name
+	if strings.TrimSpace(name) == "" {
+		name = thread.TrackedSession.Session.Title
+	}
+	if strings.TrimSpace(name) != "" {
+		name = strings.TrimSpace(name) + fmt.Sprintf(" (rollback %d)", turns)
+		_ = s.threads.SetName(ctx, child.ThreadID, name)
+		child.Name = name
+	}
+	_ = s.threads.SetMetadata(ctx, child.ThreadID, metadata)
+	child.Metadata = metadata
+	return &child, nil
+}
+
+func (s *Service) ModelRegistry(ctx context.Context) (contract.ModelRegistry, error) {
+	return api.BuildModelRegistry(s.Describe().Runtimes), nil
+}
+
 func (s *Service) providerByRuntime(runtime string) (api.Provider, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -294,6 +562,105 @@ func (s *Service) rememberSession(session contract.RuntimeSession) {
 	s.sessionRuntime[session.SessionID] = session.Runtime
 	s.mu.Unlock()
 	s.directory.Upsert(session)
+	s.ledger.Upsert(session)
+	if s.threads != nil {
+		if tracked, ok := s.ledger.Get(session.SessionID, session.ProviderSessionID); ok {
+			_ = s.threads.UpsertTrackedSession(context.Background(), tracked)
+		}
+	}
+}
+
+func mergeSessionMetadata(current map[string]any, next map[string]any) map[string]any {
+	if len(current) == 0 && len(next) == 0 {
+		return nil
+	}
+	merged := make(map[string]any, len(current)+len(next))
+	for key, value := range current {
+		merged[key] = value
+	}
+	for key, value := range next {
+		merged[key] = value
+	}
+	return merged
+}
+
+func (s *Service) ReadThread(ctx context.Context, threadID string) (*contract.ThreadRead, error) {
+	thread, err := s.GetThread(ctx, threadID, "")
+	if err != nil {
+		return nil, err
+	}
+	events, err := s.ListThreadEvents(ctx, threadID, 0, 1000)
+	if err != nil {
+		return nil, err
+	}
+	return &contract.ThreadRead{
+		Thread:     *thread,
+		Turns:      deriveThreadTurns(events),
+		EventCount: len(events),
+	}, nil
+}
+
+func deriveThreadTurns(events []contract.ThreadEvent) []contract.ThreadTurn {
+	turns := map[string]*contract.ThreadTurn{}
+	order := make([]string, 0)
+	for _, event := range events {
+		if strings.TrimSpace(event.TurnID) == "" {
+			continue
+		}
+		turn, ok := turns[event.TurnID]
+		if !ok {
+			turn = &contract.ThreadTurn{TurnID: event.TurnID, Status: contract.ThreadTurnRunning, StartedAtMS: event.RecordedAtMS}
+			turns[event.TurnID] = turn
+			order = append(order, event.TurnID)
+		}
+		turn.EventCount++
+		if event.RequestID != "" && !containsThreadString(turn.RequestIDs, event.RequestID) {
+			turn.RequestIDs = append(turn.RequestIDs, event.RequestID)
+		}
+		if text := contract.EventDeltaText(event.Event); text != "" {
+			turn.AssistantText += text
+		}
+		if final := contract.EventFinalText(event.Event); final != "" {
+			turn.AssistantText = final
+		}
+		switch event.EventType {
+		case contract.EventTurnCompleted:
+			turn.Status = contract.ThreadTurnCompleted
+			turn.CompletedAtMS = event.RecordedAtMS
+			turn.Summary = firstThreadString(event.Summary, turn.Summary)
+		case contract.EventTurnErrored, contract.EventSessionErrored:
+			turn.Status = contract.ThreadTurnErrored
+			turn.CompletedAtMS = event.RecordedAtMS
+			turn.Summary = firstThreadString(contract.EventErrorText(event.Event), event.Summary, turn.Summary)
+		case contract.EventTurnInterrupted:
+			turn.Status = contract.ThreadTurnInterrupted
+			turn.CompletedAtMS = event.RecordedAtMS
+			turn.Summary = firstThreadString(event.Summary, turn.Summary)
+		}
+	}
+	out := make([]contract.ThreadTurn, 0, len(order))
+	for _, turnID := range order {
+		out = append(out, *turns[turnID])
+	}
+	return out
+}
+
+func containsThreadString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func firstThreadString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (s *Service) refreshRuntime(runtime string, sessions []contract.RuntimeSession) {
@@ -302,6 +669,12 @@ func (s *Service) refreshRuntime(runtime string, sessions []contract.RuntimeSess
 	for _, session := range sessions {
 		s.sessionRuntime[session.SessionID] = runtime
 		s.directory.Upsert(session)
+		s.ledger.Upsert(session)
+		if s.threads != nil {
+			if tracked, ok := s.ledger.Get(session.SessionID, session.ProviderSessionID); ok {
+				_ = s.threads.UpsertTrackedSession(context.Background(), tracked)
+			}
+		}
 	}
 }
 

@@ -102,6 +102,18 @@ func (d *SessionDirectory) UpdateFromEvent(event contract.RuntimeEvent) {
 		if event.SessionState.Model != "" {
 			session.Model = event.SessionState.Model
 		}
+		if event.SessionState.Mode != "" {
+			session.Mode = event.SessionState.Mode
+		}
+		if event.SessionState.Usage != (contract.TokenUsage{}) {
+			session.Usage = event.SessionState.Usage
+		}
+		if event.SessionState.CostUSD > 0 {
+			session.CostUSD = event.SessionState.CostUSD
+		}
+		if event.SessionState.CostUSD > 0 {
+			session.CostUSD = event.SessionState.CostUSD
+		}
 		if event.SessionState.Title != "" {
 			session.Title = event.SessionState.Title
 		}
@@ -114,6 +126,18 @@ func (d *SessionDirectory) UpdateFromEvent(event contract.RuntimeEvent) {
 		if lastError, ok := event.Payload["last_error"].(string); ok && lastError != "" {
 			session.LastError = lastError
 		}
+	}
+	if mode := contract.EventMode(event); mode != "" {
+		session.Mode = mode
+	}
+	if usage, ok := contract.EventTokenUsage(event); ok {
+		session.Usage = usage
+	}
+	if cost, ok := contract.EventCostUSD(event); ok {
+		session.CostUSD = cost
+	}
+	if cost, ok := contract.EventCostUSD(event); ok {
+		session.CostUSD = cost
 	}
 
 	d.sessions[event.SessionID] = session

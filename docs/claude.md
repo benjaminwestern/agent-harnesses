@@ -9,10 +9,13 @@ events, and session teardown.
 Official references:
 
 - [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
+- [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
+- [Claude Agent SDK TypeScript reference](https://platform.claude.com/docs/en/agent-sdk/typescript)
 
-This bundle was validated on April 19, 2026 against
-`2.1.98 (Claude Code)`, as reported by `claude --version` on the validation
-machine.
+This bundle was smoke-tested locally on April 24, 2026 against
+`2.1.104 (Claude Code)`, as reported by `claude --version`. The bridge package
+has been bumped to `@anthropic-ai/claude-agent-sdk 0.2.119`, whose package
+metadata pairs with Claude Code `2.1.119`.
 
 ## Install Claude Code
 
@@ -96,8 +99,9 @@ for app-managed sessions. New Claude sessions also get a controller-assigned
 UUID at `session.start`, so `provider_session_id` is available immediately
 instead of appearing only after the first turn begins.
 
-This bridge path was validated on April 19, 2026 against `claude 2.1.98` and
-`@anthropic-ai/claude-agent-sdk 0.2.92`. The validation covered:
+This bridge path was refreshed on April 24, 2026 against local
+`claude 2.1.104` and package `@anthropic-ai/claude-agent-sdk 0.2.119`. The
+validation target covered:
 
 - a real SDK-backed turn start and streamed result
 - a real approval callback for a blocked Bash write outside the working
@@ -105,10 +109,14 @@ This bridge path was validated on April 19, 2026 against `claude 2.1.98` and
 - a real `session.respond` allow flow that unblocked the tool call and
   completed the assistant turn
 
+The TypeScript Agent SDK bundles platform-specific Claude Code binaries as
+optional dependencies. Agentic Control passes an explicit Claude Code binary
+path when available so operators can control which installed CLI is used.
+
 ## Controller parity
 
 Claude and Codex define the parity bar for app-managed sessions in
-this repository. That bar is the full controller surface Claude already
+this repository. That bar is the full controller surface Claude
 implements today:
 
 - start
@@ -142,7 +150,7 @@ The Claude adapter maps native events as follows:
 | `SessionEnd` | `session.ended` | Claude ended the session and can expose teardown metadata. |
 
 The helper preserves the original hook name as `native_event_name`, so your
-application can still reason over Claude-specific states even when it primarily
+application can reason over Claude-specific states even when it primarily
 consumes the shared `event_type`.
 
 ## What Claude passes to the hook command
@@ -202,7 +210,7 @@ After translation, the Claude adapter emits one normalised event with:
 - native session, tool, and approval metadata when Claude provides it
 - any optional `bindings` requested by your host application
 
-That gives you a stable app-facing contract while still preserving the runtime
+That gives you a stable app-facing contract while preserving the runtime
 fields you need for approval tracking, resume workflows, and investigation.
 
 ## Install the Claude bundle
@@ -260,7 +268,7 @@ The installer embeds whatever helper flags you pass after `--runtime` and
 `--scope`. That is how you attach app-owned correlation values without
 teaching the helper anything about your internal naming model.
 
-If your application already knows the socket path directly, you can use
+If your application knows the socket path directly, you can use
 `--socket-path` instead of `--socket-env`.
 
 ## Approval-aware behaviour

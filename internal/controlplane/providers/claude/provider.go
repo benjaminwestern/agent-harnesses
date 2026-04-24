@@ -600,9 +600,10 @@ func (s *session) handleSDKMessage(message streamMessage) {
 				},
 			))
 		default:
+			payload := nilIfEmptyMap(cloneMap(message.Raw))
 			s.provider.emit(s.provider.newEvent(s, "runtime.event", fmt.Sprintf("system.%s", message.Subtype), "",
 				fmt.Sprintf("Claude system event: %s", message.Subtype),
-				nil,
+				payload,
 			))
 		}
 	case "assistant":
@@ -627,16 +628,24 @@ func (s *session) handleSDKMessage(message streamMessage) {
 			nil,
 		))
 	default:
+		payload := nilIfEmptyMap(cloneMap(message.Raw))
 		s.provider.emit(s.provider.newEvent(s, "runtime.event", message.Type, "",
 			fmt.Sprintf("Claude event: %s", message.Type),
-			nil,
+			payload,
 		))
 	}
 }
 
 func (s *session) handleResult(message streamMessage) {
-	payload := map[string]any{
-		"status": string(contract.SessionIdle),
+	payload := cloneMap(message.Raw)
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["status"] = string(contract.SessionIdle)
+	if payload == nil {
+		payload = map[string]any{
+			"status": string(contract.SessionIdle),
+		}
 	}
 	if stopReason, ok := message.Raw["stop_reason"].(string); ok && stopReason != "" {
 		payload["stop_reason"] = stopReason
@@ -666,6 +675,17 @@ func (s *session) handleResult(message streamMessage) {
 		coalesce(message.Result, "Claude turn completed"),
 		payload,
 	))
+}
+
+func cloneMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (s *session) handleRequestOpened(params requestOpenedNotification) {

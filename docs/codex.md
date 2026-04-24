@@ -14,7 +14,7 @@ Official references:
 - [OpenAI Codex repository](https://github.com/openai/codex)
 
 This bundle was validated on April 19, 2026 against
-`codex-cli 0.121.0`, as reported by `codex --version` on the validation
+`codex-cli 0.124.0`, as reported by `codex --version` on the validation
 machine.
 
 ## Install Codex CLI
@@ -33,7 +33,7 @@ brew install --cask codex
 ```
 
 > [!NOTE]
-> Codex hooks are documented upstream as experimental. This repository
+> Codex hooks are documented upstream as stable. This repository
 > treats them as the primary observability surface because they expose the
 > lifecycle events that matter most for investigation, resume correlation, and
 > approval-aware testing.
@@ -52,6 +52,7 @@ The default Codex bundle listens for these native events:
 - `SessionStart`
 - `UserPromptSubmit`
 - `PreToolUse`
+- `PermissionRequest`
 - `PostToolUse`
 - `Stop`
 
@@ -60,6 +61,7 @@ The shared helper maps those into these normalised families:
 - `session.started`
 - `turn.user_prompt_submitted`
 - `tool.started`
+- `tool.permission_requested`
 - `tool.finished`
 - `turn.stopped`
 
@@ -98,6 +100,7 @@ The Codex adapter maps native events as follows:
 | `SessionStart` | `session.started` | Codex has started or resumed a session and has native session metadata available. |
 | `UserPromptSubmit` | `turn.user_prompt_submitted` | Codex has accepted a user prompt for a new turn. |
 | `PreToolUse` | `tool.started` | Codex is about to execute a tool. The bundle listens for `Bash`. |
+| `PermissionRequest` | `tool.permission_requested` | Codex needs host or user approval before continuing a tool call. |
 | `PostToolUse` | `tool.finished` | Codex has finished a tool call and can provide result metadata. |
 | `Stop` | `turn.stopped` | Codex has hit the stop hook surface, which is useful for interruption and completion cues. |
 
@@ -126,16 +129,19 @@ Tool-scoped hooks also include fields such as:
 - `tool_use_id`
 - `tool_name`
 - `tool_input`
-- `tool_output`
+- `tool_response`
+
+The helper also accepts the older `user_prompt` and `tool_output` field names
+for compatibility with pre-0.124 hook payloads.
 
 For Bash interception, the fields that matter most are:
 
 - `tool_name`
 - `tool_use_id`
 - `tool_input.command`
-- `tool_output.exit_code`
-- `tool_output.stdout`
-- `tool_output.stderr`
+- `tool_response.exit_code`
+- `tool_response.stdout`
+- `tool_response.stderr`
 
 Representative payloads in this repository:
 
@@ -239,7 +245,7 @@ Then launch Codex with hooks enabled:
 codex --enable codex_hooks
 ```
 
-If your app already knows the socket path directly, you can skip the socket
+If your app knows the socket path directly, you can skip the socket
 environment variable and use `--socket-path` instead.
 
 ## Live testing

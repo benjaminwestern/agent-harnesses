@@ -13,9 +13,11 @@ Official references:
 - [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md)
 - [pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [pi session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md)
+- [pi models](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/models.md)
 
-This bundle was validated against `@mariozechner/pi-coding-agent 0.67.68`, the
-installed version on the validation machine.
+This bundle was smoke-tested locally on April 24, 2026 against
+`@mariozechner/pi-coding-agent 0.68.0`. The upstream package version checked
+with `npx` is `0.70.0`.
 
 ## Install pi
 
@@ -84,7 +86,7 @@ The pi controller supports:
 - list active controller-owned sessions
 - stop
 
-The current provider does not expose host-owned approval or user-input
+The provider does not expose host-owned approval or user-input
 requests. pi can build those workflows with extensions and the extension UI
 sub-protocol, but Agentic Control does not impose a generic approval policy on
 pi sessions today.
@@ -95,13 +97,12 @@ observation remains available through the separate `agent_harness` extension
 bundle.
 
 Model inventory is a known control-plane gap. pi does maintain a model
-registry and exposes it through `/model` and `pi --list-models`, including
-auth-filtered built-ins and custom `~/.pi/agent/models.json` entries. It does
-not currently document a stable JSON/RPC inventory method for host
-integrations, so Agentic Control does not expose pi models through
-`system.describe` yet. The probe reports pi install/version state with
-`model_source: "runtime_default"` until a stable machine-readable contract is
-available.
+registry and exposes it through `/model`, `pi --list-models`, and the
+documented RPC `get_available_models` command, including auth-filtered
+built-ins and custom `~/.pi/agent/models.json` entries. Agentic Control does
+not expose pi models through `system.describe` yet because the new RPC
+inventory path needs a dedicated short-lived probe and smoke coverage against
+the `0.70.0` package.
 
 ## What pi passes to the harness extension
 

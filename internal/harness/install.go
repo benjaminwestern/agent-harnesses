@@ -89,7 +89,7 @@ func runInstall(args []string, stdout, stderr io.Writer) error {
 		manifest.HelperArgs = append([]string(nil), codexHelperArgs(options.HelperArgs)...)
 		manifest.HelperCommand = shellCommand(paths.HelperBinary, manifest.HelperArgs)
 		manifest.ConfigPath = paths.ConfigPath
-		manifest.Events = []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"}
+		manifest.Events = []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"}
 		if err := installCodexBundle(paths, manifest.HelperCommand); err != nil {
 			return err
 		}
@@ -410,6 +410,10 @@ func installCodexBundle(paths runtimeInstallPaths, helperCommand string) error {
 			"matcher": "Bash",
 			"hooks":   []any{map[string]any{"type": "command", "command": helperCommand}},
 		},
+		"PermissionRequest": {
+			"matcher": "Bash",
+			"hooks":   []any{map[string]any{"type": "command", "command": helperCommand}},
+		},
 		"PostToolUse": {
 			"matcher": "Bash",
 			"hooks":   []any{map[string]any{"type": "command", "command": helperCommand}},
@@ -646,9 +650,11 @@ export default function(pi: ExtensionAPI) {
     }));
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async (event, ctx) => {
     emit(basePayload(ctx, {
       hook_event_name: "session_shutdown",
+      reason: event.reason,
+      target_session_file: event.targetSessionFile,
     }));
   });
 

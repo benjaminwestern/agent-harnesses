@@ -10,7 +10,7 @@
   "tool_input": {
     "command": "pwd && ls -1 runtimes/codex"
   },
-  "tool_output": {
+  "tool_response": {
     "exit_code": 0,
     "stdout": "/workspace/agentic-control\nREADME.md\nfixtures\ngo.mod\nprompts\n",
     "stderr": ""

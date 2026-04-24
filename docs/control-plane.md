@@ -15,7 +15,8 @@ The controller boundaries are:
 ## What the control-plane provides
 
 The Go controller is a long-lived Unix socket service that keeps an active
-session registry and exposes a small RPC surface for host applications.
+session registry and exposes a typed RPC surface plus an interaction bridge for
+host applications.
 
 In practice, that gives your app one place to:
 
@@ -25,19 +26,81 @@ In practice, that gives your app one place to:
 - respond to approvals and user-input requests when the runtime supports them
 - subscribe to a typed event stream
 
-Supported methods:
+Current core controller methods:
 
 - `system.ping`
 - `system.describe`
+- `models.list`
+- `thread.list`
+- `thread.get`
+- `thread.archive`
+- `thread.set_name`
+- `thread.set_metadata`
+- `thread.fork`
+- `thread.rollback`
+- `thread.events`
+- `thread.read`
 - `events.subscribe`
 - `events.unsubscribe`
 - `session.start`
 - `session.resume`
 - `session.send`
+- `session.get`
+- `session.history`
 - `session.interrupt`
 - `session.respond`
 - `session.stop`
 - `session.list`
+
+Current interaction bridge and promoted native helpers:
+
+- `interaction.call`
+- `interaction.subscribe`
+- `interaction.unsubscribe`
+- `speech.tts.enqueue`
+- `speech.tts.cancel`
+- `speech.tts.status`
+- `speech.tts.voices.list`
+- `speech.tts.config.get`
+- `speech.tts.config.set`
+- `speech.stt.start`
+- `speech.stt.stop`
+- `speech.stt.status`
+- `speech.stt.submit`
+- `speech.stt.subscribe`
+- `speech.stt.unsubscribe`
+- `speech.stt.models.list`
+- `speech.stt.model.get`
+- `speech.stt.model.set`
+- `speech.stt.model.download`
+- `app.open`
+- `app.activate`
+- `insert.targets.list`
+- `insert.enqueue`
+- `screen.observe`
+- `screen.click`
+- `attention.enqueue`
+- `attention.list`
+- `attention.update`
+
+## Interaction layer status
+
+Agentic Interaction is part of the control-plane runtime substrate, with a
+partial typed product surface:
+
+- the daemon always probes Agentic Interaction and exposes its status from
+  `system.describe`;
+- the Go SDK and `interaction.call` / `interaction.subscribe` mirror the current
+  Agentic Interaction JSON-RPC surface;
+- a smaller set of native workflows has been promoted into dedicated
+  control-plane methods such as `speech.*`, `app.open`, `insert.targets.list`,
+  and `screen.observe`;
+- the CLI does not expose the full interaction surface as first-class command
+  groups, so many native methods are available through the Go
+  packages and daemon bridge rather than through dedicated CLI verbs.
+
+The interaction layer is in the control-plane core as an execution substrate
+and bridge, with selected workflows promoted into typed CLI and RPC surfaces.
 
 The socket server lives in
 [`cmd/agent-control/main.go`](../cmd/agent-control/main.go), the service and
@@ -80,16 +143,15 @@ model picker from:
 - `auth.status`, `auth.type`, `auth.label`, `auth.method`, and `auth.message`
   for authentication state
 - `models[]` and `model_source` for the models that the runtime can expose
-  today
+  through the control-plane
 
 Static providers such as Codex, Claude, and Gemini publish a built-in model
 catalog with per-model capabilities. OpenCode enriches its probe from the
 running `opencode serve` `/provider` endpoint when available, so upstream apps
 can show connected OpenAI, Anthropic, Google, or other provider models without
-hard-coding that inventory. pi is the exception: it has a native model registry
-and `pi --list-models`, but no documented stable JSON/RPC inventory contract,
-so the control-plane currently reports pi install/version state with
-`model_source: "runtime_default"` and no model list.
+hard-coding that inventory. pi documents RPC `get_available_models`, but
+Agentic Control needs a short-lived probe implementation before it can
+surface pi models through `system.describe`.
 
 Example request:
 
@@ -143,7 +205,7 @@ Example response shape:
       "probe": {
         "installed": true,
         "status": "ready",
-        "version": "codex-cli 0.121.0",
+        "version": "codex-cli 0.124.0",
         "binary_path": "/opt/homebrew/bin/codex",
         "auth": {
           "status": "authenticated",
@@ -221,7 +283,8 @@ Then run the controller:
 
 ```bash
 SOCKET_PATH=/tmp/agentic-control.sock
-.artifacts/bin/agent_control serve --socket-path "$SOCKET_PATH"
+agent_control serve --socket-path "$SOCKET_PATH"
+agent_control wait-ready --socket-path "$SOCKET_PATH"
 ```
 
 You can also use the convenience task:
@@ -237,7 +300,7 @@ The simplest local path is:
 
 ```bash
 SOCKET_PATH=/tmp/agentic-control.sock
-.artifacts/bin/agent_control describe --socket-path "$SOCKET_PATH"
+agent_control describe --socket-path "$SOCKET_PATH"
 ```
 
 If the server is reachable, you will get back a single JSON response with the
@@ -259,7 +322,7 @@ Example request:
   "params": {
     "runtime": "codex",
     "session_id": "voice-codex-1",
-    "cwd": "/Users/benjaminwestern/code/personal/agentic-control",
+    "cwd": "/path/to/agentic-control",
     "model": "gpt-5.4",
     "model_options": {
       "reasoning_effort": "high"
@@ -350,7 +413,7 @@ NDJSON file:
 
 ```bash
 AGENTIC_CONTROL_EVENT_LOG=/tmp/agentic-control/events.ndjson \
-  .artifacts/bin/agent_control serve --socket-path /tmp/agentic-control.sock
+  agent_control serve --socket-path /tmp/agentic-control.sock
 ```
 
 Each line includes a UTC timestamp, runtime, session ID, and the full
@@ -417,14 +480,14 @@ Gemini is one feature short of that bar:
 - stop
 
 Released Gemini ACP builds do not expose host-owned user-input requests,
-so the controller cannot yet surface `ask_user` or `exit_plan_mode` as shared
-`request.opened` user-input requests. The upstream work to close that gap is
-[google-gemini/gemini-cli#24664](https://github.com/google-gemini/gemini-cli/pull/24664),
-but parity depends on that change shipping in a released Gemini CLI build.
+so the controller cannot surface `ask_user` or `exit_plan_mode` as shared
+`request.opened` user-input requests. In the reviewed `0.39.0` package,
+[google-gemini/gemini-cli#24664](https://github.com/google-gemini/gemini-cli/pull/24664)
+is closed and not merged, so parity depends on a released ACP host-input path.
 
-The remaining Gemini parity steps are:
+The Gemini parity gaps are:
 
-- ship a Gemini CLI release that includes PR `#24664`
+- ship a released Gemini CLI host-input ACP path
 - advertise the final Gemini host-input capability during `initialize`
 - map `gemini/requestUserInput` into shared `request.opened` user-input
   requests for `ask_user` and `exit_plan_mode`
@@ -455,13 +518,13 @@ No controller-side parity work is pending for Claude.
 
 Claude uses a small Node bridge around the official TypeScript Agent SDK. The
 Go provider owns the canonical controller contract, active session
-registry, and normalized events, but approvals and user input now flow through
+registry, and normalized events, but approvals and user input flow through
 the SDK `canUseTool` boundary instead of the CLI `stream-json` input format.
 New Claude sessions also get a controller-assigned UUID at `session.start`, so
 the provider session ID is available before the first user turn is sent.
 
-This bridge path was validated on April 19, 2026 against `claude 2.1.98` and
-`@anthropic-ai/claude-agent-sdk 0.2.92` with:
+This bridge path was refreshed on April 24, 2026 against local
+`claude 2.1.104` and `@anthropic-ai/claude-agent-sdk 0.2.119` with:
 
 - a real SDK-backed turn start and streamed result
 - a real `request.opened` approval event for a blocked Bash write
@@ -520,7 +583,7 @@ does not delete the underlying OpenCode session record. That keeps
 `resume_by_provider_id` truthful and lets host applications re-attach later
 with the provider session ID.
 
-pi currently supports a narrower app-managed surface:
+pi supports a narrower app-managed surface:
 
 - start
 - resume by session file path
@@ -537,7 +600,7 @@ streamed RPC events such as `message_update`, `tool_execution_start`,
 `tool_execution_end`, and `agent_end` to produce normalized runtime events.
 
 pi does not reach the Codex and Claude parity bar because Agentic Control does
-not currently expose generic host-owned approval or user-input workflows for
+not expose generic host-owned approval or user-input workflows for
 pi. pi can build those flows with extensions and its extension UI sub-protocol,
 but the controller intentionally keeps managed pi sessions deterministic by
 starting them with `--no-extensions`.

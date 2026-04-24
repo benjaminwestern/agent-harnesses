@@ -77,7 +77,7 @@ type TextGenerationRouter struct {
 
 func NewTextGenerationRouter(defaultProvider string, providers map[string]TextGenerationProvider) *TextGenerationRouter {
 	router := &TextGenerationRouter{
-		defaultProvider: normalizeProviderName(defaultProvider),
+		defaultProvider: NormalizeRuntimeBackend(defaultProvider),
 		providers:       make(map[string]TextGenerationProvider, len(providers)),
 	}
 	for name, provider := range providers {
@@ -90,7 +90,7 @@ func (r *TextGenerationRouter) Register(providerName string, provider TextGenera
 	if r == nil || provider == nil {
 		return
 	}
-	providerName = normalizeProviderName(providerName)
+	providerName = NormalizeRuntimeBackend(providerName)
 	if providerName == "" {
 		return
 	}
@@ -111,7 +111,7 @@ func (r *TextGenerationRouter) Route(providerName string) (TextGenerationProvide
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if provider := r.providers[normalizeProviderName(providerName)]; provider != nil {
+	if provider := r.providers[NormalizeRuntimeBackend(providerName)]; provider != nil {
 		return provider, nil
 	}
 	if provider := r.providers[r.defaultProvider]; provider != nil {
@@ -207,7 +207,7 @@ func (r *TextGenerationRouter) resolveProviderName(selection TextGenerationModel
 		defaultProvider = r.defaultProvider
 	}
 	for _, candidate := range providerCandidates(selection, defaultProvider) {
-		normalized := normalizeProviderName(candidate)
+		normalized := NormalizeRuntimeBackend(candidate)
 		if normalized == "" {
 			continue
 		}
@@ -221,13 +221,13 @@ func (r *TextGenerationRouter) resolveProviderName(selection TextGenerationModel
 			return normalized
 		}
 	}
-	return normalizeProviderName(selection.Provider)
+	return NormalizeRuntimeBackend(selection.Provider)
 }
 
 func providerCandidates(selection TextGenerationModelSelection, defaultProvider string) []string {
 	candidates := []string{
 		selection.Provider,
-		InferTextGenerationProvider(selection.Model),
+		InferRuntimeBackend(selection.Model),
 	}
 	candidates = append(candidates, selection.Fallbacks...)
 	candidates = append(candidates, defaultProvider)
@@ -235,32 +235,11 @@ func providerCandidates(selection TextGenerationModelSelection, defaultProvider 
 }
 
 func InferTextGenerationProvider(model string) string {
-	model = strings.ToLower(strings.TrimSpace(model))
-	switch {
-	case model == "":
-		return ""
-	case strings.HasPrefix(model, "claude-"):
-		return "claude"
-	case strings.HasPrefix(model, "gemini-"), strings.HasPrefix(model, "auto-gemini-"):
-		return "gemini"
-	case strings.HasPrefix(model, "gpt-"), strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"), strings.HasPrefix(model, "o4"):
-		return "codex"
-	case strings.Contains(model, "/"):
-		return "opencode"
-	default:
-		return ""
-	}
+	return InferRuntimeProvider(model)
 }
 
 func normalizeProviderName(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "claudeagent", "claude-agent", "claude_code", "claudecode":
-		return "claude"
-	case "open-code":
-		return "opencode"
-	default:
-		return strings.ToLower(strings.TrimSpace(value))
-	}
+	return NormalizeRuntimeBackend(value)
 }
 
 func coalesceProvider(values ...string) string {

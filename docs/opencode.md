@@ -7,7 +7,7 @@ integration surfaces:
 - `opencode serve` for app-managed sessions through `agent_control`
 
 Unlike Codex, Gemini, and Claude, OpenCode does not need a shell-command hook
-file to expose passive lifecycle events. Its plugin system already publishes
+file to expose passive lifecycle events. Its plugin system publishes
 session, permission, and tool events directly, so the OpenCode bundle acts as
 a hook-equivalent plugin that forwards those native events into the shared Go
 helper.
@@ -21,8 +21,9 @@ Official references:
 - [OpenCode server](https://opencode.ai/docs/server/)
 - [OpenCode repository](https://github.com/anomalyco/opencode)
 
-This bundle was validated on April 19, 2026 against `1.14.17`, as
-reported by `opencode --version` on the validation machine.
+This bundle was smoke-tested locally on April 24, 2026 against `1.14.20`, as
+reported by `opencode --version`. The upstream package version checked with
+`npx` is `1.14.22`.
 
 ## Install OpenCode
 
@@ -50,7 +51,7 @@ OpenCode server for app-managed sessions.
 The Go control-plane provider starts one shared `opencode serve --pure`
 process, talks to it over HTTP, and subscribes to `/event` over server-sent
 events. That gives the control-plane the same app-managed session surface it
-already exposes for Codex, Gemini, and Claude, while keeping the passive plugin
+exposes for Codex, Gemini, and Claude, while keeping the passive plugin
 lane separate. If the SSE stream drops while the server is still alive, the
 provider retries the subscription and does a best-effort session-state resync.
 
@@ -86,17 +87,24 @@ No controller-side parity work is pending for OpenCode.
 
 The provider uses these OpenCode server routes:
 
+- `GET /global/health`
+- `GET /provider`
 - `POST /session`
 - `GET /session/:id`
 - `GET /session/status`
 - `GET /session/:id/message`
 - `POST /session/:id/prompt_async`
 - `POST /session/:id/abort`
+- `POST /permission/:requestID/reply`
 - `POST /session/:id/permissions/:permissionID`
 - `GET /question`
 - `POST /question/:requestID/reply`
 - `POST /question/:requestID/reject`
 - `GET /event`
+
+The provider prefers the SDK v2 permission reply path
+`POST /permission/:requestID/reply` and falls back to the older documented
+`POST /session/:id/permissions/:permissionID` route for compatibility.
 
 `session.stop` detaches the controller-owned session from Agentic Control, but
 it does not delete the underlying OpenCode session record. That preserves the
@@ -281,9 +289,14 @@ That matches OpenCode’s documented config precedence and permission model:
 - [OpenCode config](https://opencode.ai/docs/config/)
 - [OpenCode permissions](https://opencode.ai/docs/permissions/)
 
+Current OpenCode permission keys include `read`, `edit`, `glob`, `grep`,
+`bash`, `task`, `skill`, `lsp`, `question`, `webfetch`, `websearch`,
+`codesearch`, `external_directory`, and `doom_loop`. Agentic Control preserves
+the native permission type and pattern in the shared pending-request metadata.
+
 ## Known gap
 
-OpenCode’s plugin events are already strong enough for a real investigation
+OpenCode’s plugin events are strong enough for a real investigation
 lane, but MCP tool calls do not trigger the same tool execution hooks
 as standard tools. Track that upstream behaviour here:
 

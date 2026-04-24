@@ -4,5 +4,5 @@
   "cwd": "/workspace/agentic-control",
   "hook_event_name": "AfterAgent",
   "timestamp": "2026-04-03T21:00:04Z",
-  "response": "The Gemini harness folder contains prompts, fixtures, and installation wiring for the shared hook translator."
+  "prompt_response": "The Gemini harness folder contains prompts, fixtures, and installation wiring for the shared hook translator."
 }

@@ -10,8 +10,9 @@ Official references:
 - [Gemini CLI hooks guide](https://geminicli.com/docs/hooks/)
 - [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/)
 
-This bundle was validated on April 19, 2026 against `gemini 0.38.2`,
-as reported by `gemini --version` on the validation machine.
+This bundle was last smoke-tested locally on April 24, 2026 against
+`gemini 0.38.2`. The upstream package version checked with `npx` is
+`@google/gemini-cli 0.39.0`.
 
 ## Install Gemini CLI
 
@@ -46,6 +47,11 @@ The bundle listens for these native events:
 - `BeforeTool`
 - `AfterTool`
 - `Notification`
+
+Gemini CLI 0.39.0 also documents `BeforeModel`, `BeforeToolSelection`,
+`AfterModel`, and `PreCompress`. Agentic Control treats those as generic
+`runtime.event` payloads unless they are added to the managed hook
+bundle.
 
 The shared helper maps those into these normalised families:
 
@@ -85,6 +91,8 @@ The Gemini ACP adapter uses the native ACP methods exposed by the CLI:
 - `session/prompt`
 - `session/cancel`
 - `session/request_permission`
+- `session/set_model`
+- `session/set_mode`
 
 Gemini thinking controls are configured through control-plane
 `model_options`. Gemini CLI does not expose a per-prompt thinking knob, so the
@@ -124,16 +132,15 @@ user-input requests.
 
 Released Gemini ACP builds can surface approval requests through
 `session/request_permission`, but they disable ACP-owned `ask_user`
-flows. The upstream work to close that gap is
-[google-gemini/gemini-cli#24664](https://github.com/google-gemini/gemini-cli/pull/24664).
-That pull request adds an opt-in `gemini/requestUserInput` path so an ACP host
-can answer `ask_user` and `exit_plan_mode` itself. Gemini does not reach
-controller parity until that change lands in a released Gemini CLI build.
+flows. As of the reviewed `0.39.0` package, the proposed
+[google-gemini/gemini-cli#24664](https://github.com/google-gemini/gemini-cli/pull/24664)
+host-input path is closed and not merged, so Gemini still reports
+`user_input_requests: false`.
 
-The remaining Gemini parity steps are:
+The Gemini parity gaps are:
 
-- ship a Gemini CLI release that includes PR `#24664`
-- advertise the final Gemini host-input capability during `initialize`
+- ship a released Gemini CLI host-input ACP path
+- advertise that final Gemini host-input capability during `initialize`
 - map `gemini/requestUserInput` into shared `request.opened` user-input
   requests for `ask_user` and `exit_plan_mode`
 - route `session.respond` answers and cancellations back through the Gemini
@@ -169,11 +176,15 @@ are:
 - `hook_event_name`
 - `cwd`
 - `prompt`
+- `prompt_response`
 - `tool_name`
 - `tool_input.command`
-- `tool_result.returnDisplay`
-- `tool_result.llmContent`
+- `tool_response.returnDisplay`
+- `tool_response.llmContent`
 - `message`
+
+The helper accepts the older `tool_result` field as a compatibility
+fallback.
 
 Representative payloads in this repository:
 
@@ -257,7 +268,7 @@ uninstall command:
 
 Unlike Codex, Gemini does not need an extra experimental feature flag at launch
 time for the hook integration used here. The main runtime-specific launch rule
-is that interactive scenarios still need a real TTY. That matters for the live
+is that interactive scenarios need a real TTY. That matters for the live
 approval and prompt-aware harness runs.
 
 The installer embeds the helper flags you pass after `--runtime` and
