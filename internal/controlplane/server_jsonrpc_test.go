@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	interactionrpc "github.com/benjaminwestern/agentic-control/pkg/interaction"
 )
 
 func TestParseRPCRequestAcceptsStringAndNumericIDs(t *testing.T) {
@@ -84,6 +86,29 @@ func TestRPCMessagesMarshalWithJSONRPCVersion(t *testing.T) {
 	}
 	if got := string(notification); !containsJSONRPC(got) {
 		t.Fatalf("notification %s does not include jsonrpc version", got)
+	}
+}
+
+func TestSystemDescribeIncludesImplementedThreadMethods(t *testing.T) {
+	service := &Service{
+		interaction: interactionrpc.NewClient("/tmp/agentic-interaction-test.sock"),
+	}
+
+	methods := make(map[string]struct{}, len(service.Describe().Methods))
+	for _, method := range service.Describe().Methods {
+		methods[method] = struct{}{}
+	}
+
+	for _, method := range []string{
+		"thread.set_name",
+		"thread.set_metadata",
+		"thread.fork",
+		"thread.rollback",
+		"thread.read",
+	} {
+		if _, ok := methods[method]; !ok {
+			t.Fatalf("system.describe is missing implemented method %q", method)
+		}
 	}
 }
 

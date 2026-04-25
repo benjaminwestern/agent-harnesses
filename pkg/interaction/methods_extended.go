@@ -37,8 +37,10 @@ const (
 	MethodSTTBatchTranscribeCancel = "stt.batch.transcribe.cancel"
 	MethodSTTBatchTranscribeList   = "stt.batch.transcribe.list"
 
-	MethodTTSPause  = "tts.pause"
-	MethodTTSResume = "tts.resume"
+	MethodTTSPlay    = "tts.play"
+	MethodTTSPause   = "tts.pause"
+	MethodTTSResume  = "tts.resume"
+	MethodTTSRestart = "tts.restart"
 
 	MethodAccessibilityContextCapture = "accessibility.context.capture"
 	MethodAccessibilityContextScreen  = "accessibility.context.screen"
@@ -81,8 +83,10 @@ var extendedMethods = []string{
 	MethodSTTBatchTranscribeResult,
 	MethodSTTBatchTranscribeCancel,
 	MethodSTTBatchTranscribeList,
+	MethodTTSPlay,
 	MethodTTSPause,
 	MethodTTSResume,
+	MethodTTSRestart,
 	MethodAccessibilityContextCapture,
 	MethodAccessibilityContextScreen,
 	MethodAccessibilityFind,
@@ -210,12 +214,20 @@ func (c *Client) STTBatchTranscribeList(ctx context.Context) (json.RawMessage, e
 	return c.Call(ctx, MethodSTTBatchTranscribeList, nil)
 }
 
+func (c *Client) TTSPlay(ctx context.Context, params TTSControlParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodTTSPlay, params)
+}
+
 func (c *Client) TTSPause(ctx context.Context) (json.RawMessage, error) {
 	return c.Call(ctx, MethodTTSPause, nil)
 }
 
 func (c *Client) TTSResume(ctx context.Context) (json.RawMessage, error) {
 	return c.Call(ctx, MethodTTSResume, nil)
+}
+
+func (c *Client) TTSRestart(ctx context.Context, params TTSControlParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodTTSRestart, params)
 }
 
 func (c *Client) AccessibilityContextCapture(ctx context.Context, params AccessibilityContextParams) (json.RawMessage, error) {

@@ -52,6 +52,7 @@ type TTSSynthesizeParams struct {
 	CustomVoiceID     string   `json:"custom_voice_id,omitempty"`
 	CustomVoicePath   string   `json:"custom_voice_path,omitempty"`
 	ChunkCharacters   *int     `json:"chunk_characters,omitempty"`
+	PlaybackMode      string   `json:"playback_mode,omitempty"`
 }
 
 type TTSConfigSetParams struct {
@@ -64,9 +65,14 @@ type TTSConfigSetParams struct {
 	CustomVoiceID     string   `json:"custom_voice_id,omitempty"`
 	CustomVoicePath   string   `json:"custom_voice_path,omitempty"`
 	ChunkCharacters   *int     `json:"chunk_characters,omitempty"`
+	PlaybackMode      string   `json:"playback_mode,omitempty"`
 	SaveWAVArtifacts  *bool    `json:"save_wav_artifacts,omitempty"`
 	OutputDevice      string   `json:"output_device,omitempty"`
 	Volume            *float64 `json:"volume,omitempty"`
+}
+
+type TTSControlParams struct {
+	Text string `json:"text,omitempty"`
 }
 
 type NotificationAudioPlayParams struct {
@@ -75,10 +81,12 @@ type NotificationAudioPlayParams struct {
 	Event       string   `json:"event,omitempty"`
 	Volume      *float64 `json:"volume,omitempty"`
 	Interrupt   *bool    `json:"interrupt,omitempty"`
+	Route       string   `json:"route,omitempty"`
 }
 
 type NotificationAudioStopParams struct {
-	All *bool `json:"all,omitempty"`
+	ID  string `json:"id,omitempty"`
+	All *bool  `json:"all,omitempty"`
 }
 
 type TreeParams struct {
