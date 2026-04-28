@@ -33,6 +33,7 @@ type Status struct {
 	Available     bool            `json:"available"`
 	Methods       []string        `json:"methods,omitempty"`
 	Capabilities  map[string]bool `json:"capabilities,omitempty"`
+	Health        json.RawMessage `json:"health,omitempty"`
 	LastError     string          `json:"last_error,omitempty"`
 }
 
@@ -95,7 +96,25 @@ func NewClient(socketPath string) *Client {
 }
 
 func DefaultSocketPath() string {
-	return fmt.Sprintf("/tmp/agentic-interaction-%d.sock", os.Getuid())
+	candidates := []string{
+		"/tmp/agentic-interaction.sock",
+		"/tmp/agentic-interaction-dev.sock",
+		fmt.Sprintf("/tmp/agentic-interaction-%d.sock", os.Getuid()),
+	}
+	for _, candidate := range candidates {
+		if socketExists(candidate) {
+			return candidate
+		}
+	}
+	return candidates[0]
+}
+
+func socketExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeSocket != 0
 }
 
 func (c *Client) SocketPath() string {
@@ -122,6 +141,9 @@ func (c *Client) Describe() Status {
 		for key, value := range c.status.Capabilities {
 			status.Capabilities[key] = value
 		}
+	}
+	if len(c.status.Health) > 0 {
+		status.Health = slices.Clone(c.status.Health)
 	}
 	return status
 }
@@ -170,6 +192,9 @@ func (c *Client) Refresh(ctx context.Context) error {
 	}
 	if status.Endpoint == "" {
 		status.Endpoint = "unix://" + c.socketPath
+	}
+	if healthRaw, err := c.callRaw(ctx, MethodSystemHealth, nil); err == nil && len(healthRaw) > 0 {
+		status.Health = slices.Clone(healthRaw)
 	}
 
 	c.mu.Lock()

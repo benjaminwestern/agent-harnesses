@@ -112,6 +112,45 @@ func TestSystemDescribeIncludesImplementedThreadMethods(t *testing.T) {
 	}
 }
 
+func TestSystemDescribeIncludesPromotedInteractionMethods(t *testing.T) {
+	service := &Service{
+		interaction: interactionrpc.NewClient("/tmp/agentic-interaction-test.sock"),
+	}
+
+	methods := make(map[string]struct{}, len(service.Describe().Methods))
+	for _, method := range service.Describe().Methods {
+		methods[method] = struct{}{}
+	}
+
+	for _, method := range []string{
+		"diagnostics.repair",
+		"diagnostics.support_report",
+		"permissions.open_microphone_settings",
+		"permissions.open_input_monitoring_settings",
+		"permissions.open_screen_recording_settings",
+		"transcript.paste_last",
+		"transforms.process",
+		"transforms.apply",
+		"speech.tts.voices.refresh",
+		"notification.audio.catalog",
+		"notification.audio.play",
+		"notification.audio.stop",
+		"notification.audio.status",
+		"accessibility.diagnostics",
+		"accessibility.target_overlay.open",
+		"accessibility.target.highlight",
+		"accessibility.target_profiles.list",
+		"accessibility.target_profiles.save",
+		"accessibility.target_profiles.apply",
+		"accessibility.target_profiles.delete",
+		"observation.target.highlight",
+	} {
+		if _, ok := methods[method]; !ok {
+			t.Fatalf("system.describe is missing promoted interaction method %q", method)
+		}
+	}
+}
+
 func containsJSONRPC(raw string) bool {
 	return len(raw) > 0 && json.Valid([]byte(raw)) && strings.Contains(raw, `"jsonrpc":"2.0"`)
 }

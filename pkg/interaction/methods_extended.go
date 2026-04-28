@@ -11,7 +11,9 @@ const (
 	MethodDiagnosticsLog               = "diagnostics.log"
 	MethodDiagnosticsAcknowledge       = "diagnostics.acknowledge"
 	MethodDiagnosticsResolve           = "diagnostics.resolve"
+	MethodDiagnosticsRepair            = "diagnostics.repair"
 	MethodDiagnosticsClear             = "diagnostics.clear"
+	MethodDiagnosticsSupportReport     = "diagnostics.support_report"
 	MethodDiagnosticsEventsSubscribe   = "diagnostics.events.subscribe"
 	MethodDiagnosticsEventsUnsubscribe = "diagnostics.events.unsubscribe"
 
@@ -42,13 +44,22 @@ const (
 	MethodTTSResume  = "tts.resume"
 	MethodTTSRestart = "tts.restart"
 
-	MethodAccessibilityContextCapture = "accessibility.context.capture"
-	MethodAccessibilityContextScreen  = "accessibility.context.screen"
-	MethodAccessibilityFind           = "accessibility.find"
-	MethodAccessibilityActionPerform  = "accessibility.action.perform"
-	MethodAccessibilitySelectionSet   = "accessibility.selection.set"
-	MethodAccessibilityTextReplace    = "accessibility.text.replace"
-	MethodAccessibilityTextInspect    = "accessibility.text.inspect"
+	MethodAccessibilityContextCapture       = "accessibility.context.capture"
+	MethodAccessibilityContextScreen        = "accessibility.context.screen"
+	MethodAccessibilityFind                 = "accessibility.find"
+	MethodAccessibilityActionPerform        = "accessibility.action.perform"
+	MethodAccessibilitySelectionSet         = "accessibility.selection.set"
+	MethodAccessibilityTextReplace          = "accessibility.text.replace"
+	MethodAccessibilityTextInspect          = "accessibility.text.inspect"
+	MethodAccessibilityDiagnostics          = "accessibility.diagnostics"
+	MethodAccessibilityTargetOverlayOpen    = "accessibility.target_overlay.open"
+	MethodAccessibilityTargetHighlight      = "accessibility.target.highlight"
+	MethodAccessibilityTargetProfilesList   = "accessibility.target_profiles.list"
+	MethodAccessibilityTargetProfilesSave   = "accessibility.target_profiles.save"
+	MethodAccessibilityTargetProfilesApply  = "accessibility.target_profiles.apply"
+	MethodAccessibilityTargetProfilesDelete = "accessibility.target_profiles.delete"
+
+	MethodObservationTargetHighlight = "observation.target.highlight"
 
 	MethodAppsInstalledList = "apps.installed.list"
 	MethodAppsFind          = "apps.find"
@@ -60,7 +71,9 @@ var extendedMethods = []string{
 	MethodDiagnosticsLog,
 	MethodDiagnosticsAcknowledge,
 	MethodDiagnosticsResolve,
+	MethodDiagnosticsRepair,
 	MethodDiagnosticsClear,
+	MethodDiagnosticsSupportReport,
 	MethodDiagnosticsEventsSubscribe,
 	MethodDiagnosticsEventsUnsubscribe,
 	MethodSTTRealtimeModelsList,
@@ -94,6 +107,14 @@ var extendedMethods = []string{
 	MethodAccessibilitySelectionSet,
 	MethodAccessibilityTextReplace,
 	MethodAccessibilityTextInspect,
+	MethodAccessibilityDiagnostics,
+	MethodAccessibilityTargetOverlayOpen,
+	MethodAccessibilityTargetHighlight,
+	MethodAccessibilityTargetProfilesList,
+	MethodAccessibilityTargetProfilesSave,
+	MethodAccessibilityTargetProfilesApply,
+	MethodAccessibilityTargetProfilesDelete,
+	MethodObservationTargetHighlight,
 	MethodAppsInstalledList,
 	MethodAppsFind,
 }
@@ -122,8 +143,16 @@ func (c *Client) DiagnosticsResolve(ctx context.Context, params DiagnosticsIssue
 	return c.Call(ctx, MethodDiagnosticsResolve, params)
 }
 
+func (c *Client) DiagnosticsRepair(ctx context.Context, params DiagnosticsRepairParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodDiagnosticsRepair, params)
+}
+
 func (c *Client) DiagnosticsClear(ctx context.Context) (json.RawMessage, error) {
 	return c.Call(ctx, MethodDiagnosticsClear, nil)
+}
+
+func (c *Client) DiagnosticsSupportReport(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodDiagnosticsSupportReport, nil)
 }
 
 func (c *Client) DiagnosticsEventsSubscribe(ctx context.Context, params DiagnosticsEventSubscribeParams, onNotification func(method string, params json.RawMessage)) (*Subscription, error) {
@@ -256,6 +285,38 @@ func (c *Client) AccessibilityTextReplace(ctx context.Context, params Accessibil
 
 func (c *Client) AccessibilityTextInspect(ctx context.Context, params AccessibilityTextInspectParams) (json.RawMessage, error) {
 	return c.Call(ctx, MethodAccessibilityTextInspect, params)
+}
+
+func (c *Client) AccessibilityDiagnostics(ctx context.Context, params AccessibilityDiagnosticsParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodAccessibilityDiagnostics, params)
+}
+
+func (c *Client) AccessibilityTargetOverlayOpen(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodAccessibilityTargetOverlayOpen, nil)
+}
+
+func (c *Client) AccessibilityTargetHighlight(ctx context.Context, params AccessibilityTargetHighlightParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodAccessibilityTargetHighlight, params)
+}
+
+func (c *Client) AccessibilityTargetProfilesList(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodAccessibilityTargetProfilesList, nil)
+}
+
+func (c *Client) AccessibilityTargetProfilesSave(ctx context.Context, params AccessibilityTargetProfileSaveParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodAccessibilityTargetProfilesSave, params)
+}
+
+func (c *Client) AccessibilityTargetProfilesApply(ctx context.Context, params AccessibilityTargetProfileSelectParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodAccessibilityTargetProfilesApply, params)
+}
+
+func (c *Client) AccessibilityTargetProfilesDelete(ctx context.Context, params AccessibilityTargetProfileSelectParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodAccessibilityTargetProfilesDelete, params)
+}
+
+func (c *Client) ObservationTargetHighlight(ctx context.Context, params ObservationTargetHighlightParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodObservationTargetHighlight, params)
 }
 
 func (c *Client) AppsInstalledList(ctx context.Context, params InstalledApplicationsParams) (json.RawMessage, error) {

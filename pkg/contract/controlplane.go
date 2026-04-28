@@ -1,5 +1,7 @@
 package contract
 
+import "encoding/json"
+
 const (
 	ControlPlaneSchemaVersion = "agentic-control.control-plane.v1"
 	HarnessSchemaVersion      = "agentic-control.harness.v1"
@@ -140,6 +142,7 @@ type InteractionStatus struct {
 	Available     bool            `json:"available"`
 	Methods       []string        `json:"methods,omitempty"`
 	Capabilities  map[string]bool `json:"capabilities,omitempty"`
+	Health        json.RawMessage `json:"health,omitempty"`
 	LastError     string          `json:"last_error,omitempty"`
 }
 

@@ -27,6 +27,39 @@ type DiagnosticsIssueParams struct {
 	IssueID string `json:"issue_id"`
 }
 
+type DiagnosticsRepairParams struct {
+	IssueID    string            `json:"issue_id,omitempty"`
+	ActionID   string            `json:"action_id,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	Target     string            `json:"target,omitempty"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+}
+
+type TranscriptReplacementRequest struct {
+	Source      string `json:"source"`
+	Replacement string `json:"replacement"`
+}
+
+type TranscriptTransformConfigParams struct {
+	Enabled      *bool                          `json:"enabled,omitempty"`
+	RemovalTerms []string                       `json:"removal_terms,omitempty"`
+	Replacements []TranscriptReplacementRequest `json:"replacements,omitempty"`
+}
+
+type TransformProcessParams struct {
+	Text         string                         `json:"text"`
+	Enabled      *bool                          `json:"enabled,omitempty"`
+	RemovalTerms []string                       `json:"removal_terms,omitempty"`
+	Replacements []TranscriptReplacementRequest `json:"replacements,omitempty"`
+}
+
+type TransformApplyParams struct {
+	Text         string                         `json:"text,omitempty"`
+	Enabled      *bool                          `json:"enabled,omitempty"`
+	RemovalTerms []string                       `json:"removal_terms,omitempty"`
+	Replacements []TranscriptReplacementRequest `json:"replacements,omitempty"`
+}
+
 type AccessibilityContextParams struct {
 	MaxDepth       *int   `json:"max_depth,omitempty"`
 	MaxChildren    *int   `json:"max_children,omitempty"`
@@ -91,6 +124,53 @@ type AccessibilityTextInspectParams struct {
 	Occurrence     string         `json:"occurrence,omitempty"`
 	TargetRegion   string         `json:"target_region,omitempty"`
 	FocusPolicy    string         `json:"focus_policy,omitempty"`
+}
+
+type AccessibilityDiagnosticsParams struct {
+	Text              string `json:"text,omitempty"`
+	TargetPath        string `json:"target_path,omitempty"`
+	TargetBundleID    string `json:"target_bundle_id,omitempty"`
+	TargetAppName     string `json:"target_app_name,omitempty"`
+	TargetWindowTitle string `json:"target_window_title,omitempty"`
+	TargetPID         *int   `json:"target_pid,omitempty"`
+	Mode              string `json:"mode,omitempty"`
+	MaxDepth          *int   `json:"max_depth,omitempty"`
+	MaxChildren       *int   `json:"max_children,omitempty"`
+}
+
+type AccessibilityTargetHighlightParams struct {
+	TargetPath      string   `json:"target_path,omitempty"`
+	TargetBundleID  string   `json:"target_bundle_id,omitempty"`
+	TargetPID       *int     `json:"target_pid,omitempty"`
+	X               *float64 `json:"x,omitempty"`
+	Y               *float64 `json:"y,omitempty"`
+	Width           *float64 `json:"width,omitempty"`
+	Height          *float64 `json:"height,omitempty"`
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+}
+
+type AccessibilityTargetProfileSaveParams struct {
+	ID           string `json:"id,omitempty"`
+	BundleID     string `json:"bundle_id,omitempty"`
+	AppName      string `json:"app_name,omitempty"`
+	WindowTitle  string `json:"window_title,omitempty"`
+	TargetPath   string `json:"target_path,omitempty"`
+	TargetLabel  string `json:"target_label,omitempty"`
+	TargetPID    *int   `json:"target_pid,omitempty"`
+	Mode         string `json:"mode,omitempty"`
+	TargetRegion string `json:"target_region,omitempty"`
+	FocusPolicy  string `json:"focus_policy,omitempty"`
+}
+
+type AccessibilityTargetProfileSelectParams struct {
+	ID       string `json:"id,omitempty"`
+	BundleID string `json:"bundle_id,omitempty"`
+	AppName  string `json:"app_name,omitempty"`
+}
+
+type ObservationTargetHighlightParams struct {
+	Target          map[string]any `json:"target,omitempty"`
+	DurationSeconds *float64       `json:"duration_seconds,omitempty"`
 }
 
 type STTJobParams struct {

@@ -57,12 +57,25 @@ Current interaction bridge and promoted native helpers:
 - `interaction.call`
 - `interaction.subscribe`
 - `interaction.unsubscribe`
+- `diagnostics.repair`
+- `diagnostics.support_report`
+- `permissions.open_microphone_settings`
+- `permissions.open_input_monitoring_settings`
+- `permissions.open_screen_recording_settings`
+- `transcript.paste_last`
 - `speech.tts.enqueue`
 - `speech.tts.cancel`
 - `speech.tts.status`
 - `speech.tts.voices.list`
+- `speech.tts.voices.refresh`
 - `speech.tts.config.get`
 - `speech.tts.config.set`
+- `transforms.process`
+- `transforms.apply`
+- `notification.audio.catalog`
+- `notification.audio.play`
+- `notification.audio.stop`
+- `notification.audio.status`
 - `speech.stt.start`
 - `speech.stt.stop`
 - `speech.stt.status`
@@ -77,6 +90,14 @@ Current interaction bridge and promoted native helpers:
 - `app.activate`
 - `insert.targets.list`
 - `insert.enqueue`
+- `accessibility.diagnostics`
+- `accessibility.target_overlay.open`
+- `accessibility.target.highlight`
+- `accessibility.target_profiles.list`
+- `accessibility.target_profiles.save`
+- `accessibility.target_profiles.apply`
+- `accessibility.target_profiles.delete`
+- `observation.target.highlight`
 - `screen.observe`
 - `screen.click`
 - `attention.enqueue`
@@ -90,6 +111,9 @@ partial typed product surface:
 
 - the daemon always probes Agentic Interaction and exposes its status from
   `system.describe`;
+- when Agentic Interaction exposes `system.health`, the status includes the raw
+  health object so hosts can see JSON-RPC and MCP transport state, including
+  the MCP HTTP/SSE endpoint when enabled;
 - the Go SDK and `interaction.call` / `interaction.subscribe` mirror the current
   Agentic Interaction JSON-RPC surface;
 - a smaller set of native workflows has been promoted into dedicated

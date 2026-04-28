@@ -16,6 +16,9 @@ const (
 	MethodPermissionsRequestMicrophone         = "permissions.request_microphone"
 	MethodPermissionsRequestAccessibility      = "permissions.request_accessibility"
 	MethodPermissionsOpenAccessibilitySettings = "permissions.open_accessibility_settings"
+	MethodPermissionsOpenMicrophoneSettings    = "permissions.open_microphone_settings"
+	MethodPermissionsOpenInputMonitoring       = "permissions.open_input_monitoring_settings"
+	MethodPermissionsOpenScreenRecording       = "permissions.open_screen_recording_settings"
 
 	MethodModelsCatalog             = "models.catalog"
 	MethodModelsParakeetEOUStatus   = "models.parakeet_eou.status"
@@ -25,11 +28,14 @@ const (
 	MethodModelsDownloadJob         = "models.download_job"
 	MethodModelsDownloadCancel      = "models.download_cancel"
 
-	MethodTranscriptGet     = "transcript.get"
-	MethodTranscriptSet     = "transcript.set"
-	MethodTranscriptCopy    = "transcript.copy"
-	MethodTranscriptInsert  = "transcript.insert"
-	MethodTranscriptProcess = "transcript.process"
+	MethodTranscriptGet       = "transcript.get"
+	MethodTranscriptSet       = "transcript.set"
+	MethodTranscriptCopy      = "transcript.copy"
+	MethodTranscriptPasteLast = "transcript.paste_last"
+	MethodTranscriptInsert    = "transcript.insert"
+	MethodTranscriptProcess   = "transcript.process"
+	MethodTransformsProcess   = "transforms.process"
+	MethodTransformsApply     = "transforms.apply"
 
 	MethodSTTStart             = "stt.start"
 	MethodSTTStop              = "stt.stop"
@@ -47,6 +53,7 @@ const (
 	MethodTTSStop            = "tts.stop"
 	MethodTTSStatus          = "tts.status"
 	MethodTTSVoicesList      = "tts.voices.list"
+	MethodTTSVoicesRefresh   = "tts.voices.refresh"
 	MethodTTSConfigGet       = "tts.config.get"
 	MethodTTSConfigSet       = "tts.config.set"
 	MethodTTSSpeakSelected   = "tts.speak_selected"
@@ -91,6 +98,9 @@ var AllMethods = []string{
 	MethodPermissionsRequestMicrophone,
 	MethodPermissionsRequestAccessibility,
 	MethodPermissionsOpenAccessibilitySettings,
+	MethodPermissionsOpenMicrophoneSettings,
+	MethodPermissionsOpenInputMonitoring,
+	MethodPermissionsOpenScreenRecording,
 	MethodModelsCatalog,
 	MethodModelsParakeetEOUStatus,
 	MethodModelsParakeetEOUEnsure,
@@ -101,8 +111,11 @@ var AllMethods = []string{
 	MethodTranscriptGet,
 	MethodTranscriptSet,
 	MethodTranscriptCopy,
+	MethodTranscriptPasteLast,
 	MethodTranscriptInsert,
 	MethodTranscriptProcess,
+	MethodTransformsProcess,
+	MethodTransformsApply,
 	MethodSTTStart,
 	MethodSTTStop,
 	MethodSTTReset,
@@ -118,6 +131,7 @@ var AllMethods = []string{
 	MethodTTSStop,
 	MethodTTSStatus,
 	MethodTTSVoicesList,
+	MethodTTSVoicesRefresh,
 	MethodTTSConfigGet,
 	MethodTTSConfigSet,
 	MethodTTSSpeakSelected,
@@ -180,6 +194,18 @@ func (c *Client) PermissionsOpenAccessibilitySettings(ctx context.Context) (json
 	return c.Call(ctx, MethodPermissionsOpenAccessibilitySettings, nil)
 }
 
+func (c *Client) PermissionsOpenMicrophoneSettings(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodPermissionsOpenMicrophoneSettings, nil)
+}
+
+func (c *Client) PermissionsOpenInputMonitoringSettings(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodPermissionsOpenInputMonitoring, nil)
+}
+
+func (c *Client) PermissionsOpenScreenRecordingSettings(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodPermissionsOpenScreenRecording, nil)
+}
+
 func (c *Client) ModelsCatalog(ctx context.Context) (json.RawMessage, error) {
 	return c.Call(ctx, MethodModelsCatalog, nil)
 }
@@ -220,6 +246,10 @@ func (c *Client) TranscriptCopy(ctx context.Context) (json.RawMessage, error) {
 	return c.Call(ctx, MethodTranscriptCopy, nil)
 }
 
+func (c *Client) TranscriptPasteLast(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodTranscriptPasteLast, nil)
+}
+
 func (c *Client) TranscriptInsert(ctx context.Context, params OptionalTextParams) (json.RawMessage, error) {
 	return c.Call(ctx, MethodTranscriptInsert, params)
 }
@@ -228,8 +258,20 @@ func (c *Client) TranscriptProcess(ctx context.Context, params any) (json.RawMes
 	return c.Call(ctx, MethodTranscriptProcess, params)
 }
 
-func (c *Client) STTStart(ctx context.Context) (json.RawMessage, error) {
-	return c.Call(ctx, MethodSTTStart, nil)
+func (c *Client) TransformsProcess(ctx context.Context, params TransformProcessParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodTransformsProcess, params)
+}
+
+func (c *Client) TransformsApply(ctx context.Context, params TransformApplyParams) (json.RawMessage, error) {
+	return c.Call(ctx, MethodTransformsApply, params)
+}
+
+func (c *Client) STTStart(ctx context.Context, params ...STTStartParams) (json.RawMessage, error) {
+	var payload any
+	if len(params) > 0 {
+		payload = params[0]
+	}
+	return c.Call(ctx, MethodSTTStart, payload)
 }
 
 func (c *Client) STTStop(ctx context.Context) (json.RawMessage, error) {
@@ -286,6 +328,10 @@ func (c *Client) TTSStatus(ctx context.Context) (json.RawMessage, error) {
 
 func (c *Client) TTSVoicesList(ctx context.Context) (json.RawMessage, error) {
 	return c.Call(ctx, MethodTTSVoicesList, nil)
+}
+
+func (c *Client) TTSVoicesRefresh(ctx context.Context) (json.RawMessage, error) {
+	return c.Call(ctx, MethodTTSVoicesRefresh, nil)
 }
 
 func (c *Client) TTSConfigGet(ctx context.Context) (json.RawMessage, error) {

@@ -25,6 +25,41 @@ type STTModelDownloadParams struct {
 	Select *bool  `json:"select,omitempty"`
 }
 
+type VADConfigParams struct {
+	Mode                string   `json:"mode,omitempty"`
+	Threshold           *float64 `json:"threshold,omitempty"`
+	PreRollSeconds      *float64 `json:"pre_roll_seconds,omitempty"`
+	MinSpeechSeconds    *float64 `json:"min_speech_seconds,omitempty"`
+	MinSilenceSeconds   *float64 `json:"min_silence_seconds,omitempty"`
+	HangoverSeconds     *float64 `json:"hangover_seconds,omitempty"`
+	MaxUtteranceSeconds *float64 `json:"max_utterance_seconds,omitempty"`
+}
+
+type STTStartParams struct {
+	Provider                        string                           `json:"provider,omitempty"`
+	Language                        string                           `json:"language,omitempty"`
+	Model                           string                           `json:"model,omitempty"`
+	RealtimeModel                   string                           `json:"realtime_model,omitempty"`
+	RealtimePunctuationEnabled      *bool                            `json:"realtime_punctuation_enabled,omitempty"`
+	InputDeviceID                   *int                             `json:"input_device_id,omitempty"`
+	InputDeviceName                 string                           `json:"input_device_name,omitempty"`
+	VAD                             *VADConfigParams                 `json:"vad,omitempty"`
+	CompletionPolicy                string                           `json:"completion_policy,omitempty"`
+	InsertDestination               string                           `json:"insert_destination,omitempty"`
+	RealtimeSegmentInsertionEnabled *bool                            `json:"realtime_segment_insertion_enabled,omitempty"`
+	RecordingMediaPolicy            string                           `json:"recording_media_policy,omitempty"`
+	InsertionMode                   string                           `json:"insertion_mode,omitempty"`
+	TargetRegion                    string                           `json:"target_region,omitempty"`
+	FocusPolicy                     string                           `json:"focus_policy,omitempty"`
+	TargetPath                      string                           `json:"target_path,omitempty"`
+	TargetBundleID                  string                           `json:"target_bundle_id,omitempty"`
+	TargetAppName                   string                           `json:"target_app_name,omitempty"`
+	TargetWindowTitle               string                           `json:"target_window_title,omitempty"`
+	TargetPID                       *int                             `json:"target_pid,omitempty"`
+	UseSelectedTarget               *bool                            `json:"use_selected_target,omitempty"`
+	Transform                       *TranscriptTransformConfigParams `json:"transform,omitempty"`
+}
+
 type EventSubscribeParams struct {
 	Kinds []string `json:"kinds,omitempty"`
 }
@@ -39,11 +74,15 @@ type TTSSynthesizeParams struct {
 	ModelPath         string   `json:"model_path,omitempty"`
 	SavePath          string   `json:"save_path,omitempty"`
 	Voice             string   `json:"voice,omitempty"`
+	KokoroVoice       string   `json:"kokoro_voice,omitempty"`
+	AppleVoice        string   `json:"apple_voice,omitempty"`
 	UseMetal          *bool    `json:"use_metal,omitempty"`
 	Play              *bool    `json:"play,omitempty"`
 	SaveWAV           *bool    `json:"save_wav,omitempty"`
+	SaveWAVArtifacts  *bool    `json:"save_wav_artifacts,omitempty"`
 	OutputDevice      string   `json:"output_device,omitempty"`
 	Volume            *float64 `json:"volume,omitempty"`
+	Language          string   `json:"language,omitempty"`
 	VoiceSpeed        *float64 `json:"voice_speed,omitempty"`
 	SpeakerID         *int     `json:"speaker_id,omitempty"`
 	VariantPreference string   `json:"variant_preference,omitempty"`
@@ -56,7 +95,10 @@ type TTSSynthesizeParams struct {
 }
 
 type TTSConfigSetParams struct {
+	Provider          string   `json:"provider,omitempty"`
 	Voice             string   `json:"voice,omitempty"`
+	KokoroVoice       string   `json:"kokoro_voice,omitempty"`
+	AppleVoice        string   `json:"apple_voice,omitempty"`
 	VoiceSpeed        *float64 `json:"voice_speed,omitempty"`
 	SpeakerID         *int     `json:"speaker_id,omitempty"`
 	VariantPreference string   `json:"variant_preference,omitempty"`

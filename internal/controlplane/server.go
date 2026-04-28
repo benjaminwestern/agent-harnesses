@@ -598,6 +598,77 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				continue
 			}
 			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "diagnostics.repair":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "diagnostics.repair", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "diagnostics.support_report":
+			result, err := s.service.CallInteraction(ctx, "diagnostics.support_report", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "permissions.open_microphone_settings":
+			result, err := s.service.CallInteraction(ctx, "permissions.open_microphone_settings", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "permissions.open_input_monitoring_settings":
+			result, err := s.service.CallInteraction(ctx, "permissions.open_input_monitoring_settings", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "permissions.open_screen_recording_settings":
+			result, err := s.service.CallInteraction(ctx, "permissions.open_screen_recording_settings", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "transcript.paste_last":
+			result, err := s.service.CallInteraction(ctx, "transcript.paste_last", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "transforms.process":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "transforms.process", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "transforms.apply":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "transforms.apply", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
 		case "speech.tts.enqueue":
 			params, err := paramsMap(request.Params)
 			if err != nil {
@@ -636,6 +707,13 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				continue
 			}
 			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "speech.tts.voices.refresh":
+			result, err := s.service.CallInteraction(ctx, "tts.voices.refresh", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
 		case "speech.tts.config.get":
 			result, err := s.service.CallInteraction(ctx, "tts.config.get", nil)
 			if err != nil {
@@ -650,6 +728,44 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				continue
 			}
 			result, err := s.service.CallInteraction(ctx, "tts.config.set", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "notification.audio.catalog":
+			result, err := s.service.CallInteraction(ctx, "notification.audio.catalog", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "notification.audio.play":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "notification.audio.play", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "notification.audio.stop":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "notification.audio.stop", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "notification.audio.status":
+			result, err := s.service.CallInteraction(ctx, "notification.audio.status", nil)
 			if err != nil {
 				_ = writer.writeJSON(errorResponse(request.ID, err))
 				continue
@@ -803,6 +919,92 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				continue
 			}
 			result, err := s.service.EnqueueInsert(ctx, params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "accessibility.diagnostics":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "accessibility.diagnostics", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "accessibility.target_overlay.open":
+			result, err := s.service.CallInteraction(ctx, "accessibility.target_overlay.open", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "accessibility.target.highlight":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "accessibility.target.highlight", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "accessibility.target_profiles.list":
+			result, err := s.service.CallInteraction(ctx, "accessibility.target_profiles.list", nil)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "accessibility.target_profiles.save":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "accessibility.target_profiles.save", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "accessibility.target_profiles.apply":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "accessibility.target_profiles.apply", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "accessibility.target_profiles.delete":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "accessibility.target_profiles.delete", params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+		case "observation.target.highlight":
+			params, err := paramsMap(request.Params)
+			if err != nil {
+				_ = writer.writeJSON(errorResponse(request.ID, err))
+				continue
+			}
+			result, err := s.service.CallInteraction(ctx, "observation.target.highlight", params)
 			if err != nil {
 				_ = writer.writeJSON(errorResponse(request.ID, err))
 				continue
