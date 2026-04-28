@@ -36,6 +36,10 @@ type Service struct {
 	speechResponses  map[string]*speechResponseTurn
 }
 
+type closeProvider interface {
+	Close() error
+}
+
 func NewService(providers ...api.Provider) *Service {
 	service := &Service{
 		providers:       make(map[string]api.Provider),
@@ -59,6 +63,39 @@ func NewService(providers ...api.Provider) *Service {
 		service.providers[provider.Runtime()] = provider
 	}
 	return service
+}
+
+func (s *Service) Close() error {
+	s.mu.RLock()
+	providers := make([]api.Provider, 0, len(s.providers))
+	for _, provider := range s.providers {
+		providers = append(providers, provider)
+	}
+	threads := s.threads
+	eventLogger := s.eventLogger
+	s.mu.RUnlock()
+
+	var errs []error
+	for _, provider := range providers {
+		closer, ok := provider.(closeProvider)
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close provider %s: %w", provider.Runtime(), err))
+		}
+	}
+	if threads != nil {
+		if err := threads.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close thread store: %w", err))
+		}
+	}
+	if eventLogger != nil {
+		if err := eventLogger.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close event logger: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Service) PublishEvent(event contract.RuntimeEvent) {

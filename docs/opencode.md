@@ -54,6 +54,9 @@ events. That gives the control-plane the same app-managed session surface it
 exposes for Codex, Gemini, and Claude, while keeping the passive plugin
 lane separate. If the SSE stream drops while the server is still alive, the
 provider retries the subscription and does a best-effort session-state resync.
+The shared server belongs to the Agentic Control core process, not to an
+individual controller session; clients that need a native OpenCode surface can
+reuse the same endpoint with `opencode attach`.
 
 The `/event` route is a live-only stream, not a replay stream. Reconnect gives
 the provider a fresh subscription plus best-effort status recovery, but it may
@@ -109,7 +112,9 @@ The provider prefers the SDK v2 permission reply path
 `session.stop` detaches the controller-owned session from Agentic Control, but
 it does not delete the underlying OpenCode session record. That preserves the
 resume path for host applications that want to re-attach later by provider
-session ID.
+session ID. Runtime session metadata includes the active OpenCode server URL
+and structured `opencode attach` arguments so callers can address that session
+without discovering a second server.
 
 OpenCode `session.resume` is limited to idle or previously detached
 provider sessions. The controller rejects busy sessions during adoption because

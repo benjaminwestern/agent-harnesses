@@ -35,6 +35,13 @@ func New() *ControlPlane {
 	return &ControlPlane{service: service}
 }
 
+func (c *ControlPlane) Close() error {
+	if c == nil || c.service == nil {
+		return nil
+	}
+	return c.service.Close()
+}
+
 func (c *ControlPlane) Describe() contract.SystemDescriptor {
 	return c.service.Describe()
 }

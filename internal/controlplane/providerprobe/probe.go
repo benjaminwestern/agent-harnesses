@@ -116,7 +116,7 @@ func (c *Cache) probe(ctx context.Context) contract.RuntimeProbe {
 		return result
 	}
 
-	output, err := exec.CommandContext(ctx, path, c.args...).CombinedOutput()
+	output, err := combinedOutput(ctx, path, c.args...)
 	version := strings.TrimSpace(string(output))
 	if version != "" {
 		result.Version = firstLine(version)
@@ -143,7 +143,7 @@ func (c *Cache) probeAuth(parent context.Context, path string, result *contract.
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 
-	output, err := exec.CommandContext(ctx, path, c.authArgs...).CombinedOutput()
+	output, err := combinedOutput(ctx, path, c.authArgs...)
 	auth := parseAuthProbe(string(output), err)
 	auth.Method = strings.Join(c.authArgs, " ")
 	result.Auth = auth
@@ -163,6 +163,22 @@ func (c *Cache) probeAuth(parent context.Context, path string, result *contract.
 	if result.Message == "" {
 		result.Message = auth.Message
 	}
+}
+
+func combinedOutput(ctx context.Context, path string, args ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, path, args...)
+	configureCommandGroup(command)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			terminateCommandGroup(command)
+		case <-done:
+		}
+	}()
+	output, err := command.CombinedOutput()
+	close(done)
+	return output, err
 }
 
 func parseAuthProbe(output string, commandErr error) contract.AuthProbe {

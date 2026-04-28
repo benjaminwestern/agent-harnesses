@@ -38,6 +38,7 @@ func newServeCmd() *cobra.Command {
 				opencode.NewProvider(emit),
 				pi.NewProvider(emit),
 			)
+			defer func() { _ = service.Close() }()
 			server := internal.NewRPCServer(service)
 			return server.ServeUnix(ctx, socketPath)
 		},

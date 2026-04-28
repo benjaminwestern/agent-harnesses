@@ -79,6 +79,7 @@ type serverProcess struct {
 	cancel       context.CancelFunc
 	cmd          *exec.Cmd
 	baseURL      string
+	ownerPath    string
 	client       *http.Client
 	streamClient *http.Client
 	provider     *Provider
@@ -337,17 +338,33 @@ func (p *Provider) enrichProbeWithInventory(ctx context.Context, probe *contract
 		return
 	}
 
+	var inventory remoteProviderInventory
+	if err := p.ensureServer(ctx, ""); err != nil {
+		if cached, ok := p.cachedInventory(); ok {
+			inventory = cached
+		} else {
+			if probe.ModelSource == "" {
+				probe.ModelSource = "dynamic_error"
+			}
+			if probe.Status == "ready" {
+				probe.Status = "warning"
+			}
+			probe.Message = appendProbeMessage(probe.Message, fmt.Sprintf("OpenCode server unavailable: %s", err))
+			return
+		}
+	}
+
 	p.mu.RLock()
 	server := p.server
 	p.mu.RUnlock()
-	var inventory remoteProviderInventory
-	if server == nil {
-		var ok bool
-		inventory, ok = p.cachedInventory()
-		if !ok {
-			var err error
-			inventory, err = probeStandaloneOpenCodeInventory(ctx)
-			if err != nil {
+	if server != nil {
+		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+
+		if err := server.doJSON(ctx, http.MethodGet, "/provider", "", nil, &inventory); err != nil {
+			if cached, ok := p.cachedInventory(); ok {
+				inventory = cached
+			} else {
 				if probe.ModelSource == "" {
 					probe.ModelSource = "dynamic_error"
 				}
@@ -357,28 +374,17 @@ func (p *Provider) enrichProbeWithInventory(ctx context.Context, probe *contract
 				probe.Message = appendProbeMessage(probe.Message, fmt.Sprintf("OpenCode model inventory unavailable: %s", err))
 				return
 			}
+		} else {
 			p.storeInventory(inventory)
 		}
-	} else {
-		ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-
-		if err := server.doJSON(ctx, http.MethodGet, "/provider", "", nil, &inventory); err != nil {
-			if probe.ModelSource == "" {
-				probe.ModelSource = "dynamic_error"
-			}
-			if probe.Status == "ready" {
-				probe.Status = "warning"
-			}
-			probe.Message = appendProbeMessage(probe.Message, fmt.Sprintf("OpenCode model inventory unavailable: %s", err))
-			return
-		}
-		p.storeInventory(inventory)
 	}
 
 	models := runtimeModelsFromOpenCodeInventory(inventory)
 	probe.Models = models
 	probe.ModelSource = "opencode_provider_endpoint"
+	if server != nil {
+		probe.Message = appendProbeMessage(probe.Message, fmt.Sprintf("OpenCode server %s; attach with `opencode attach %s`.", server.baseURL, server.baseURL))
+	}
 	if len(inventory.Connected) > 0 {
 		probe.Auth = contract.AuthProbe{
 			Status:  "authenticated",
@@ -390,7 +396,7 @@ func (p *Provider) enrichProbeWithInventory(ctx context.Context, probe *contract
 		if probe.Status != "missing" {
 			probe.Status = "ready"
 		}
-		probe.Message = fmt.Sprintf("Found %d connected OpenCode provider(s) and %d model(s).", len(inventory.Connected), len(models))
+		probe.Message = appendProbeMessage(probe.Message, fmt.Sprintf("Found %d connected OpenCode provider(s) and %d model(s).", len(inventory.Connected), len(models)))
 		return
 	}
 
@@ -403,7 +409,7 @@ func (p *Provider) enrichProbeWithInventory(ctx context.Context, probe *contract
 	if probe.Status == "ready" {
 		probe.Status = "warning"
 	}
-	probe.Message = "OpenCode has no connected providers."
+	probe.Message = appendProbeMessage(probe.Message, "OpenCode has no connected providers.")
 }
 
 func (p *Provider) cachedInventory() (remoteProviderInventory, bool) {
@@ -420,61 +426,6 @@ func (p *Provider) storeInventory(inventory remoteProviderInventory) {
 	defer p.inventoryMu.Unlock()
 	p.inventory = inventory
 	p.inventoryExpires = time.Now().Add(inventoryProbeTTL)
-}
-
-func probeStandaloneOpenCodeInventory(ctx context.Context) (remoteProviderInventory, error) {
-	var inventory remoteProviderInventory
-	port, err := reservePort()
-	if err != nil {
-		return inventory, err
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-
-	command := exec.CommandContext(
-		ctx,
-		opencodeBinaryPath(),
-		"serve",
-		"--hostname",
-		loopbackHost,
-		"--port",
-		strconv.Itoa(port),
-		"--pure",
-	)
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return inventory, err
-	}
-	stderr, err := command.StderrPipe()
-	if err != nil {
-		return inventory, err
-	}
-	if err := command.Start(); err != nil {
-		return inventory, err
-	}
-	go discardReader(stdout)
-	go discardReader(stderr)
-
-	server := &serverProcess{
-		ctx:     ctx,
-		cancel:  cancel,
-		cmd:     command,
-		baseURL: fmt.Sprintf("http://%s:%d", loopbackHost, port),
-		client:  &http.Client{Timeout: 3 * time.Second},
-	}
-	defer func() {
-		cancel()
-		_ = command.Wait()
-	}()
-
-	if err := server.waitForHealth(ctx); err != nil {
-		return inventory, err
-	}
-	if err := server.doJSON(ctx, http.MethodGet, "/provider", "", nil, &inventory); err != nil {
-		return inventory, err
-	}
-	return inventory, nil
 }
 
 func (p *Provider) StartSession(
@@ -526,7 +477,6 @@ func (p *Provider) StartSession(
 				nil,
 			)
 			p.deleteSession(request.SessionID)
-			p.shutdownServerIfIdle()
 			sess.clearPendingRequests()
 			sess.clearActiveTurnID()
 			sess.setInterruptRequested(false)
@@ -583,7 +533,6 @@ func (p *Provider) ResumeSession(
 	status, err := p.syncSessionStatusFromRemote(ctx, sess)
 	if err != nil {
 		p.deleteSession(request.SessionID)
-		p.shutdownServerIfIdle()
 		return nil, fmt.Errorf(
 			"cannot verify OpenCode session %q status for adoption: %w",
 			request.ProviderSessionID,
@@ -592,7 +541,6 @@ func (p *Provider) ResumeSession(
 	}
 	if status != contract.SessionIdle {
 		p.deleteSession(request.SessionID)
-		p.shutdownServerIfIdle()
 		return nil, fmt.Errorf(
 			"cannot adopt active OpenCode session %q with status %q",
 			request.ProviderSessionID,
@@ -771,7 +719,6 @@ func (p *Provider) StopSession(
 	}
 
 	p.deleteSession(sessionID)
-	p.shutdownServerIfIdle()
 
 	sess.clearActiveTurnID()
 	sess.setInterruptRequested(false)
@@ -882,16 +829,18 @@ func (p *Provider) deleteSessionByProviderID(providerSessionID string) *session 
 	return sess
 }
 
-func (p *Provider) shutdownServerIfIdle() {
+func (p *Provider) Close() error {
 	p.mu.Lock()
-	if len(p.sessions) != 0 || p.server == nil {
-		p.mu.Unlock()
-		return
-	}
 	server := p.server
 	p.server = nil
+	p.sessions = make(map[string]*session)
+	p.providerSessions = make(map[string]*session)
 	p.mu.Unlock()
-	server.stop()
+
+	if server != nil {
+		server.stop()
+	}
+	return nil
 }
 
 func (p *Provider) serverExited(server *serverProcess, err error) {
@@ -946,7 +895,30 @@ func (p *Provider) newEvent(
 	return contract.NewRuntimeEvent(*sess.snapshot(), eventType, nativeEventName, turnID, summary, payload)
 }
 
+func (p *Provider) attachMetadata(cwd string, providerSessionID string) map[string]any {
+	p.mu.RLock()
+	server := p.server
+	p.mu.RUnlock()
+	if server == nil {
+		return nil
+	}
+	args := []string{"opencode", "attach", server.baseURL}
+	if cwd != "" {
+		args = append(args, "--dir", cwd)
+	}
+	if providerSessionID != "" {
+		args = append(args, "--session", providerSessionID)
+	}
+	return map[string]any{
+		"opencode_server_url":    server.baseURL,
+		"opencode_attach_args":   args,
+		"opencode_attach_method": "opencode attach",
+	}
+}
+
 func startServer(ctx context.Context, cwd string, provider *Provider) (*serverProcess, error) {
+	cleanupStaleOwnedServers()
+
 	port, err := reservePort()
 	if err != nil {
 		return nil, err
@@ -963,6 +935,7 @@ func startServer(ctx context.Context, cwd string, provider *Provider) (*serverPr
 		strconv.Itoa(port),
 		"--pure",
 	)
+	configureServerCommand(command)
 	if cwd != "" {
 		command.Dir = cwd
 	}
@@ -992,6 +965,7 @@ func startServer(ctx context.Context, cwd string, provider *Provider) (*serverPr
 		streamClient: &http.Client{},
 		provider:     provider,
 	}
+	server.ownerPath = writeServerOwnerRecord(server, cwd)
 
 	go discardReader(stdout)
 	go discardReader(stderr)
@@ -999,6 +973,7 @@ func startServer(ctx context.Context, cwd string, provider *Provider) (*serverPr
 	if err := server.waitForHealth(ctx); err != nil {
 		server.stop()
 		_ = command.Wait()
+		server.removeOwnerRecord()
 		return nil, err
 	}
 
@@ -1009,9 +984,11 @@ func startServer(ctx context.Context, cwd string, provider *Provider) (*serverPr
 
 func (s *serverProcess) stop() {
 	s.cancel()
+	terminateServerCommand(s.cmd)
 }
 
 func (s *serverProcess) waitLoop() {
+	defer s.removeOwnerRecord()
 	err := s.cmd.Wait()
 	s.cancel()
 	s.provider.serverExited(s, err)
@@ -1311,7 +1288,6 @@ func (p *Provider) handleSessionDeleted(remote remoteSession) {
 		"OpenCode session ended",
 		map[string]any{"status": string(contract.SessionStopped)},
 	))
-	p.shutdownServerIfIdle()
 }
 
 func (p *Provider) handleSessionStatus(update remoteSessionStatusEnvelope) {
@@ -1924,7 +1900,6 @@ func (p *Provider) handleMissingSessionAfterReconnect(sess *session) {
 			"recovered": true,
 		},
 	))
-	p.shutdownServerIfIdle()
 }
 
 func (p *Provider) fetchRecoveredTurnRecord(
@@ -2160,6 +2135,7 @@ func (s *session) snapshot() *contract.RuntimeSession {
 		UpdatedAtMS:       s.updatedAtMS,
 		LastActivityAtMS:  s.updatedAtMS,
 		LastError:         s.lastError,
+		Metadata:          s.provider.attachMetadata(s.cwd, s.providerSessionID),
 	}
 }
 

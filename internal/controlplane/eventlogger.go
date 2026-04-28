@@ -54,3 +54,12 @@ func (l *EventLogger) Write(event contract.RuntimeEvent) error {
 		Event:     event,
 	})
 }
+
+func (l *EventLogger) Close() error {
+	if l == nil || l.file == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.file.Close()
+}

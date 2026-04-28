@@ -578,9 +578,12 @@ question updates. The `/event` route is a live-only stream, not a replay
 stream, so if the SSE connection drops the provider retries the subscription
 and does a best-effort session-state resync. That recovery path can restore
 terminal turn truth, but it cannot reconstruct every missed tool,
-approval, or assistant-delta event from the gap. When recovery cannot
-determine the terminal turn outcome, the controller emits a generic
-`runtime.event` recovery notice instead of inventing success.
+approval, or assistant-delta event from the gap. When recovery cannot determine
+the terminal turn outcome, the controller emits a generic `runtime.event`
+recovery notice instead of inventing success. The shared OpenCode server is
+owned by the Agentic Control core process, and session metadata exposes the
+server URL plus `opencode attach` arguments for clients that need to attach to
+the same server endpoint.
 
 If the dropped window leaves the session in a generic busy state without enough
 recoverable in-flight detail, the controller emits a recovery `runtime.event`
