@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
@@ -16,6 +17,8 @@ const (
 	ReductionModeCompare   ReductionMode = "compare"
 	ReductionModeSummarize ReductionMode = "summarize"
 	ReductionModeBestOfN   ReductionMode = "best_of_n"
+	ReductionModeEvaluate  ReductionMode = "evaluate"
+	ReductionModeGEval     ReductionMode = "g_eval"
 )
 
 type ReductionResult struct {
@@ -29,6 +32,7 @@ type ReductionResult struct {
 	StopError       string                   `json:"stop_error,omitempty"`
 	RecordedUsage   contract.TokenUsage      `json:"recorded_usage,omitempty"`
 	RecordedCostUSD float64                  `json:"recorded_cost_usd,omitempty"`
+	Logprobs        []contract.TokenLogprob  `json:"logprobs,omitempty"`
 }
 
 type ReviewedFanoutResult struct {
@@ -69,6 +73,61 @@ func RunReduction(ctx context.Context, controller FanoutController, mode Reducti
 	if err != nil {
 		return ReductionResult{}, err
 	}
+	var responseSchema map[string]any
+	switch mode {
+	case ReductionModeCompare:
+		responseSchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"summary":        map[string]any{"type": "string"},
+				"comparison":     map[string]any{"type": "string"},
+				"recommendation": map[string]any{"type": "string"},
+				"ranked_labels":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+			"required":             []string{"summary", "comparison", "recommendation", "ranked_labels"},
+			"additionalProperties": false,
+		}
+	case ReductionModeSummarize:
+		responseSchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"summary":    map[string]any{"type": "string"},
+				"synthesis":  map[string]any{"type": "string"},
+				"highlights": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+			"required":             []string{"summary", "synthesis", "highlights"},
+			"additionalProperties": false,
+		}
+	case ReductionModeBestOfN:
+		responseSchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"summary":               map[string]any{"type": "string"},
+				"winner_label":          map[string]any{"type": "string"},
+				"rationale":             map[string]any{"type": "string"},
+				"recommended_next_step": map[string]any{"type": "string"},
+			},
+			"required":             []string{"summary", "winner_label", "rationale", "recommended_next_step"},
+			"additionalProperties": false,
+		}
+	case ReductionModeEvaluate:
+		responseSchema = map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"score":     map[string]any{"type": "number"},
+				"rationale": map[string]any{"type": "string"},
+				"passed":    map[string]any{"type": "boolean"},
+			},
+			"required":             []string{"score", "rationale", "passed"},
+			"additionalProperties": false,
+		}
+	}
+
+	if mode == ReductionModeGEval {
+		resolved.Options.Logprobs = true
+		resolved.Options.TopLogprobs = 5
+	}
+
 	result, err := api.RunStructuredSession(ctx, controller, resolved.Backend, api.StartSessionRequest{
 		SessionID:    "reduce-" + randomFanoutID(),
 		Model:        resolved.Model,
@@ -81,6 +140,7 @@ func RunReduction(ctx context.Context, controller FanoutController, mode Reducti
 			"workflow_mode":  string(mode),
 			"reduction_mode": string(mode),
 		},
+		ResponseSchema: responseSchema,
 	}, api.StructuredSessionOptions{
 		Extract:        reductionExtractor(mode),
 		RepairPrompt:   reductionRepairPrompt(mode),
@@ -94,11 +154,29 @@ func RunReduction(ctx context.Context, controller FanoutController, mode Reducti
 	}
 	output.Text = result.Text
 	output.JSON = result.JSON
+	output.Logprobs = result.Logprobs
 	if tracked, err := controller.GetTrackedSession(ctx, result.Session.SessionID, result.Session.ProviderSessionID); err == nil {
 		output.Session = tracked
 		output.RecordedUsage = tracked.Session.Usage
 		output.RecordedCostUSD = tracked.Session.CostUSD
 	}
+
+	if mode == ReductionModeGEval {
+		score, ok := gEvalScoreFromLogprobs(output.Logprobs)
+		if !ok {
+			output.Error = "g-eval requires provider logprobs for score tokens 1-5"
+			output.JSON = ""
+		} else {
+			syntheticJSON := map[string]any{
+				"score":     score,
+				"rationale": "G-Eval logarithmic probability evaluation",
+				"passed":    score >= 3.0,
+			}
+			b, _ := json.Marshal(syntheticJSON)
+			output.JSON = string(b)
+		}
+	}
+
 	if keepSession {
 		return output, nil
 	}
@@ -113,6 +191,30 @@ func RunReduction(ctx context.Context, controller FanoutController, mode Reducti
 		output.RecordedCostUSD = tracked.Session.CostUSD
 	}
 	return output, nil
+}
+
+func gEvalScoreFromLogprobs(logprobs []contract.TokenLogprob) (float64, bool) {
+	tokenScores := map[string]float64{"1": 1.0, "2": 2.0, "3": 3.0, "4": 4.0, "5": 5.0}
+	for _, lp := range logprobs {
+		if len(lp.TopLogprobs) > 0 {
+			totalProb := 0.0
+			weightedSum := 0.0
+			for _, top := range lp.TopLogprobs {
+				if score, ok := tokenScores[strings.TrimSpace(top.Token)]; ok {
+					prob := math.Exp(top.Logprob)
+					totalProb += prob
+					weightedSum += prob * score
+				}
+			}
+			if totalProb > 0 {
+				return weightedSum / totalProb, true
+			}
+		}
+		if score, ok := tokenScores[strings.TrimSpace(lp.Token)]; ok {
+			return score, true
+		}
+	}
+	return 0, false
 }
 
 func resolveReductionTarget(descriptors []contract.RuntimeDescriptor, requested FanoutTarget) (FanoutTarget, error) {
@@ -155,6 +257,13 @@ func reductionPrompt(mode ReductionMode, fanout FanoutResult) string {
 	case ReductionModeBestOfN:
 		builder.WriteString("Return this shape:\n")
 		builder.WriteString(`{"summary":"...","winner_label":"candidate-1","rationale":"...","recommended_next_step":"..."}`)
+	case ReductionModeEvaluate:
+		builder.WriteString("Evaluate the target output against the expected ground truth or rubric.\n")
+		builder.WriteString("Return this shape:\n")
+		builder.WriteString(`{"score": 1.0, "rationale":"...","passed":true}`)
+	case ReductionModeGEval:
+		builder.WriteString("Evaluate the target output against the expected ground truth or rubric.\n")
+		builder.WriteString("Output ONLY a single integer score between 1 and 5. Do not output anything else. No explanation, no JSON, just the number.")
 	}
 	return builder.String()
 }
@@ -164,37 +273,59 @@ func reductionRepairPrompt(mode ReductionMode) string {
 }
 
 func reductionExtractor(mode ReductionMode) api.StructuredResultExtractor {
-	return func(values ...string) (string, string) {
-		return api.ExtractStructuredJSON(strings.Join(values, "\n"), func(candidate string) (string, string, bool) {
+	return func(values ...string) (string, string, error) {
+		if mode == ReductionModeGEval {
+			text := strings.TrimSpace(firstNonEmptyValue(values...))
+			if text == "" {
+				return "", "", fmt.Errorf("no output for g-eval")
+			}
+			return text, text, nil
+		}
+		return api.ExtractStructuredJSON(strings.Join(values, "\n"), func(candidate string) (string, string, error) {
 			return parseReductionResult(mode, candidate)
 		})
 	}
 }
 
-func parseReductionResult(mode ReductionMode, candidate string) (string, string, bool) {
+func parseReductionResult(mode ReductionMode, candidate string) (string, string, error) {
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(candidate), &raw); err != nil {
-		return "", "", false
+		return "", "", fmt.Errorf("invalid json: %w", err)
 	}
 	switch mode {
 	case ReductionModeCompare:
 		if strings.TrimSpace(stringValue(raw["summary"])) == "" || strings.TrimSpace(stringValue(raw["comparison"])) == "" {
-			return "", "", false
+			return "", "", fmt.Errorf("missing summary or comparison")
 		}
-		return renderCompareResult(raw), normaliseJSON(raw), true
+		return renderCompareResult(raw), normaliseJSON(raw), nil
 	case ReductionModeSummarize:
 		if strings.TrimSpace(stringValue(raw["summary"])) == "" || strings.TrimSpace(stringValue(raw["synthesis"])) == "" {
-			return "", "", false
+			return "", "", fmt.Errorf("missing summary or synthesis")
 		}
-		return renderSummarizeResult(raw), normaliseJSON(raw), true
+		return renderSummarizeResult(raw), normaliseJSON(raw), nil
 	case ReductionModeBestOfN:
 		if strings.TrimSpace(stringValue(raw["winner_label"])) == "" || strings.TrimSpace(stringValue(raw["rationale"])) == "" {
-			return "", "", false
+			return "", "", fmt.Errorf("missing winner_label or rationale")
 		}
-		return renderBestOfNResult(raw), normaliseJSON(raw), true
+		return renderBestOfNResult(raw), normaliseJSON(raw), nil
+	case ReductionModeEvaluate:
+		if strings.TrimSpace(stringValue(raw["rationale"])) == "" || raw["score"] == nil || raw["passed"] == nil {
+			return "", "", fmt.Errorf("missing rationale, score or passed")
+		}
+		return renderEvaluateResult(raw), normaliseJSON(raw), nil
 	default:
-		return "", "", false
+		return "", "", fmt.Errorf("unknown reduction mode")
 	}
+}
+
+func renderEvaluateResult(values map[string]any) string {
+	var b strings.Builder
+	b.WriteString("# Evaluation Result\n\n")
+	fmt.Fprintf(&b, "**Score:** %v\n", values["score"])
+	fmt.Fprintf(&b, "**Passed:** %v\n\n", values["passed"])
+	b.WriteString("## Rationale\n\n")
+	b.WriteString(stringValue(values["rationale"]))
+	return strings.TrimSpace(b.String())
 }
 
 func renderCompareResult(values map[string]any) string {
@@ -268,4 +399,13 @@ func stringValue(value any) string {
 		}
 		return string(encoded)
 	}
+}
+
+func firstNonEmptyValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

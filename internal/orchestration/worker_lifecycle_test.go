@@ -9,9 +9,7 @@ import (
 func TestExecuteWorkerCompleted(t *testing.T) {
 	type run struct{ id string }
 	type worker struct {
-		id        string
-		terminal  bool
-		cancelled bool
+		id string
 	}
 	type identity struct{ ok bool }
 

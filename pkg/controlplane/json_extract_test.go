@@ -1,14 +1,20 @@
 package controlplane
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestExtractStructuredJSONFindsTrailingObject(t *testing.T) {
-	rendered, normalised := ExtractStructuredJSON("tool noise\n{\"ok\":true}", func(candidate string) (string, string, bool) {
+	rendered, normalised, err := ExtractStructuredJSON("tool noise\n{\"ok\":true}", func(candidate string) (string, string, error) {
 		if candidate == "{\"ok\":true}" {
-			return "ok", candidate, true
+			return "ok", candidate, nil
 		}
-		return "", "", false
+		return "", "", fmt.Errorf("invalid")
 	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if rendered != "ok" {
 		t.Fatalf("rendered = %q, want ok", rendered)
 	}

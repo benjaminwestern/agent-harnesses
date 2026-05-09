@@ -101,7 +101,7 @@ aliases before it starts `gemini --acp`.
 
 Supported Gemini model options are:
 
-- `thinking_level: "LOW" | "HIGH"` for Gemini 3 models
+- `thinking_level: "LOW" | "HIGH"` (or `reasoning_effort: "low" | "high"`) for Gemini 3 models
 - `thinking_budget: -1 | 0 | 512` for Gemini 2.5 models
 
 When an option applies, the provider sends Gemini the generated alias but keeps

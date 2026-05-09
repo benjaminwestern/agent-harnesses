@@ -3,11 +3,12 @@ package contract
 type ProviderKind string
 
 const (
-	ProviderKindCodex   ProviderKind = "codex"
-	ProviderKindClaude  ProviderKind = "claude"
-	ProviderKindGemini  ProviderKind = "gemini"
-	ProviderKindOpenCode ProviderKind = "opencode"
-	ProviderKindPi      ProviderKind = "pi"
+	ProviderKindCodex        ProviderKind = "codex"
+	ProviderKindClaude       ProviderKind = "claude"
+	ProviderKindGemini       ProviderKind = "gemini"
+	ProviderKindOpenCode     ProviderKind = "opencode"
+	ProviderKindPi           ProviderKind = "pi"
+	ProviderKindOpenAICompat ProviderKind = "openai-compatible"
 )
 
 type CodexModelOptions struct {
@@ -34,12 +35,18 @@ type OpenCodeModelOptions struct {
 
 type PiModelOptions struct{}
 
+type OpenAICompatModelOptions struct {
+	BaseURL string `json:"base_url,omitempty"`
+	APIKey  string `json:"api_key,omitempty"`
+}
+
 type ModelSelection struct {
-	Provider ProviderKind `json:"provider"`
-	Model    string       `json:"model"`
-	Codex    *CodexModelOptions `json:"codex,omitempty"`
-	Claude   *ClaudeModelOptions `json:"claude,omitempty"`
-	Gemini   *GeminiModelOptions `json:"gemini,omitempty"`
-	OpenCode *OpenCodeModelOptions `json:"opencode,omitempty"`
-	Pi       *PiModelOptions `json:"pi,omitempty"`
+	Provider     ProviderKind              `json:"provider"`
+	Model        string                    `json:"model"`
+	Codex        *CodexModelOptions        `json:"codex,omitempty"`
+	Claude       *ClaudeModelOptions       `json:"claude,omitempty"`
+	Gemini       *GeminiModelOptions       `json:"gemini,omitempty"`
+	OpenCode     *OpenCodeModelOptions     `json:"opencode,omitempty"`
+	Pi           *PiModelOptions           `json:"pi,omitempty"`
+	OpenAICompat *OpenAICompatModelOptions `json:"openai_compat,omitempty"`
 }

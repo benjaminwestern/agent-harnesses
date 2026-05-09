@@ -22,6 +22,7 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	root.AddCommand(newServeCmd())
+	root.AddCommand(newSetupCmd())
 	root.AddCommand(newWaitReadyCmd())
 	root.AddCommand(newWorkerCmd())
 	root.AddCommand(newDescribeCmd())
@@ -31,5 +32,12 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newSmokeCmd())
 	root.AddCommand(newOrchestrateCmd())
 	root.AddCommand(newCourtCmd())
+	root.AddCommand(newWorkspaceMemoryCmd())
+	root.AddCommand(newWorkspaceDocumentsCmd())
+	root.AddCommand(newWorkspaceTasksCmd())
+	root.AddCommand(newWorkspaceWakeupsCmd())
+	root.AddCommand(newWorkspaceLeasesCmd())
+	root.AddCommand(newMCPCmd())
+	root.AddCommand(newDatasetCmd())
 	return root
 }

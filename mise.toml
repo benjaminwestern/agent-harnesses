@@ -12,8 +12,8 @@ run = "mise tasks ls --local"
 [tasks.build]
 description = "Build the shared harness and control-plane binaries"
 run = """
-if [[ ! -d internal/controlplane/providers/claude/sdkbridge/node_modules/@anthropic-ai/claude-agent-sdk ]]; then
-  npm ci --prefix internal/controlplane/providers/claude/sdkbridge
+if [[ ! -d pkg/providers/claude/sdkbridge/node_modules/@anthropic-ai/claude-agent-sdk ]]; then
+  npm ci --prefix pkg/providers/claude/sdkbridge
 fi
 mkdir -p .artifacts/bin
 go build -o .artifacts/bin/agent_harness ./cmd/agent-harness
@@ -36,7 +36,7 @@ run = """
 find scripts runtimes -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 find scripts -type f -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 find runtimes -type f -name '*.js' -print0 | xargs -0 -n1 node --check
-find internal/controlplane/providers/claude/sdkbridge -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check
+find pkg/providers/claude/sdkbridge -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check
 """
 
 [tasks."generate-assets"]

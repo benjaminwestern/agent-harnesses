@@ -46,6 +46,7 @@ const (
 	AttentionActionSpeak     AttentionAction = "speak"
 	AttentionActionAsk       AttentionAction = "ask"
 	AttentionActionInsert    AttentionAction = "insert"
+	AttentionActionNotify    AttentionAction = "notify"
 	AttentionActionSummarise AttentionAction = "summarise"
 	AttentionActionIgnore    AttentionAction = "ignore"
 	AttentionActionDefer     AttentionAction = "defer"

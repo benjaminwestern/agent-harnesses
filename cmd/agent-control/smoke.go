@@ -32,7 +32,7 @@ func newSmokeCmd() *cobra.Command {
 				selections = append(selections, *selection)
 			}
 			if len(targets) == 0 && len(selections) == 0 {
-				targets = []string{"claude=claude-sonnet-4-6", "gemini=gemini-3-flash-preview", "codex=gpt-5.4", "opencode=google/gemini-3-flash-preview", "opencode=openai/gpt-5.4"}
+				targets = []string{"claude=claude-sonnet-4-6", "gemini=gemini-3-flash-preview", "codex=gpt-5.4", "opencode=google/gemini-3-flash-preview", "opencode=openai/gpt-5.4", "openai-compatible=gemma4:e2b-it-q4_K_M"}
 			}
 			controller := fanoutController(socketPath)
 			result, err := orchestration.RunFanout(context.Background(), controller, orchestration.FanoutOptions{Prompt: task, Targets: parseFanoutTargets(targets, selections), Metadata: map[string]any{"workflow": "smoke"}})

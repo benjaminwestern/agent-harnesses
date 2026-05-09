@@ -101,6 +101,44 @@ type RequestAnswer struct {
 	Text       string `json:"text,omitempty"`
 }
 
+// ContentPart represents a single piece of rich media or text inside a prompt/message.
+type ContentPart struct {
+	Type     string `json:"type"`                // "text", "reasoning", "image", "audio", "file"
+	Text     string `json:"text,omitempty"`      // Content for "text" or "reasoning" parts
+	MIMEType string `json:"mime_type,omitempty"` // E.g., "image/jpeg", "audio/wav"
+	Data     string `json:"data,omitempty"`      // Base64 encoded payload
+	URL      string `json:"url,omitempty"`       // Alternative to Data: a fully qualified URL
+}
+
+type MessageRole string
+
+const (
+	MessageRoleSystem    MessageRole = "system"
+	MessageRoleUser      MessageRole = "user"
+	MessageRoleAssistant MessageRole = "assistant"
+	MessageRoleTool      MessageRole = "tool"
+)
+
+type FunctionCall struct {
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
+}
+
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"` // "function"
+	Function FunctionCall `json:"function"`
+}
+
+// Message represents a single discrete utterance in a conversational thread.
+type Message struct {
+	Role       MessageRole   `json:"role"`
+	Parts      []ContentPart `json:"parts,omitempty"`
+	ToolCalls  []ToolCall    `json:"tool_calls,omitempty"`   // For assistant messages
+	ToolCallID string        `json:"tool_call_id,omitempty"` // For tool messages
+	Name       string        `json:"name,omitempty"`         // For tool messages
+}
+
 type RuntimeCapabilities struct {
 	StartSession             bool `json:"start_session"`
 	ResumeSession            bool `json:"resume_session"`
@@ -115,6 +153,8 @@ type RuntimeCapabilities struct {
 	ImmediateProviderSession bool `json:"immediate_provider_session"`
 	ResumeByProviderID       bool `json:"resume_by_provider_id"`
 	AdoptExternalSessions    bool `json:"adopt_external_sessions"`
+	TextGeneration           bool `json:"text_generation"`
+	Embeddings               bool `json:"embeddings"`
 }
 
 type RuntimeDescriptor struct {
@@ -175,12 +215,13 @@ type RuntimeModelCapabilities struct {
 }
 
 type RuntimeModel struct {
-	ID           string                   `json:"id"`
-	Label        string                   `json:"label,omitempty"`
-	Provider     string                   `json:"provider,omitempty"`
-	Default      bool                     `json:"default,omitempty"`
-	Custom       bool                     `json:"custom,omitempty"`
-	Capabilities RuntimeModelCapabilities `json:"capabilities,omitempty"`
+	ID             string                   `json:"id"`
+	Label          string                   `json:"label,omitempty"`
+	Provider       string                   `json:"provider,omitempty"`
+	Default        bool                     `json:"default,omitempty"`
+	Custom         bool                     `json:"custom,omitempty"`
+	Capabilities   RuntimeModelCapabilities `json:"capabilities,omitempty"`
+	DefaultOptions map[string]any           `json:"default_options,omitempty"`
 }
 
 type RuntimeProbe struct {

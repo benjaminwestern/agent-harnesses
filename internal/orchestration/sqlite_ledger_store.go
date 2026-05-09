@@ -326,3 +326,214 @@ func parseLedgerTime(value string) time.Time {
 	t, _ := time.Parse(time.RFC3339Nano, value)
 	return t
 }
+
+func (s *SQLiteLedgerStore) UpsertDataset(ctx context.Context, ds DatasetRecord) error {
+	now := time.Now()
+	if ds.CreatedAt.IsZero() {
+		ds.CreatedAt = now
+	}
+	if ds.UpdatedAt.IsZero() {
+		ds.UpdatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO datasets (id, name, schema_definition, source_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name = excluded.name, schema_definition = excluded.schema_definition, source_type = excluded.source_type, updated_at = excluded.updated_at`,
+		ds.ID, ds.Name, ds.SchemaDefinition, ds.SourceType, formatLedgerTime(ds.CreatedAt), formatLedgerTime(ds.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("upsert dataset: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteLedgerStore) UpsertPrompt(ctx context.Context, p PromptRecord) error {
+	now := time.Now()
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = now
+	}
+	if p.UpdatedAt.IsZero() {
+		p.UpdatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO prompts (id, name, content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name = excluded.name, content = excluded.content, version = excluded.version, updated_at = excluded.updated_at`,
+		p.ID, p.Name, p.Content, p.Version, formatLedgerTime(p.CreatedAt), formatLedgerTime(p.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("upsert prompt: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteLedgerStore) UpsertDatasetItem(ctx context.Context, item DatasetItemRecord) error {
+	now := time.Now()
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	if item.UpdatedAt.IsZero() {
+		item.UpdatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO dataset_items (id, dataset_id, input_payload, target_output, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET dataset_id = excluded.dataset_id, input_payload = excluded.input_payload, target_output = excluded.target_output, status = excluded.status, updated_at = excluded.updated_at`,
+		item.ID, item.DatasetID, item.InputPayload, item.TargetOutput, item.Status, formatLedgerTime(item.CreatedAt), formatLedgerTime(item.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("upsert dataset item: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteLedgerStore) UpsertEvaluation(ctx context.Context, eval EvaluationRecord) error {
+	now := time.Now()
+	if eval.CreatedAt.IsZero() {
+		eval.CreatedAt = now
+	}
+	if eval.UpdatedAt.IsZero() {
+		eval.UpdatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO evaluations (id, name, dataset_id, prompt_id, target_model, judge_model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name = excluded.name, dataset_id = excluded.dataset_id, prompt_id = excluded.prompt_id, target_model = excluded.target_model, judge_model = excluded.judge_model, updated_at = excluded.updated_at`,
+		eval.ID, eval.Name, eval.DatasetID, eval.PromptID, eval.TargetModel, eval.JudgeModel, formatLedgerTime(eval.CreatedAt), formatLedgerTime(eval.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("upsert evaluation: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteLedgerStore) AddEvaluationResult(ctx context.Context, result EvaluationResultRecord) error {
+	now := time.Now()
+	if result.CreatedAt.IsZero() {
+		result.CreatedAt = now
+	}
+	passed := 0
+	if result.Passed {
+		passed = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO evaluation_results (id, evaluation_id, dataset_item_id, score, rationale, passed, latency_ms, cost_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		result.ID, result.EvaluationID, result.DatasetItemID, result.Score, result.Rationale, passed, result.LatencyMS, result.CostUSD, formatLedgerTime(result.CreatedAt))
+	if err != nil {
+		return fmt.Errorf("insert evaluation result: %w", err)
+	}
+	return nil
+}
+
+func scanDatasetRecord(row ledgerScanner) (DatasetRecord, error) {
+	var ds DatasetRecord
+	var created, updated string
+	if err := row.Scan(&ds.ID, &ds.Name, &ds.SchemaDefinition, &ds.SourceType, &created, &updated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DatasetRecord{}, fmt.Errorf("dataset not found")
+		}
+		return DatasetRecord{}, fmt.Errorf("scan dataset: %w", err)
+	}
+	ds.CreatedAt = parseLedgerTime(created)
+	ds.UpdatedAt = parseLedgerTime(updated)
+	return ds, nil
+}
+
+func scanPromptRecord(row ledgerScanner) (PromptRecord, error) {
+	var p PromptRecord
+	var created, updated string
+	if err := row.Scan(&p.ID, &p.Name, &p.Content, &p.Version, &created, &updated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return PromptRecord{}, fmt.Errorf("prompt not found")
+		}
+		return PromptRecord{}, fmt.Errorf("scan prompt: %w", err)
+	}
+	p.CreatedAt = parseLedgerTime(created)
+	p.UpdatedAt = parseLedgerTime(updated)
+	return p, nil
+}
+
+func scanDatasetItemRecord(row ledgerScanner) (DatasetItemRecord, error) {
+	var item DatasetItemRecord
+	var created, updated string
+	if err := row.Scan(&item.ID, &item.DatasetID, &item.InputPayload, &item.TargetOutput, &item.Status, &created, &updated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DatasetItemRecord{}, fmt.Errorf("dataset item not found")
+		}
+		return DatasetItemRecord{}, fmt.Errorf("scan dataset item: %w", err)
+	}
+	item.CreatedAt = parseLedgerTime(created)
+	item.UpdatedAt = parseLedgerTime(updated)
+	return item, nil
+}
+
+func scanEvaluationRecord(row ledgerScanner) (EvaluationRecord, error) {
+	var eval EvaluationRecord
+	var created, updated string
+	if err := row.Scan(&eval.ID, &eval.Name, &eval.DatasetID, &eval.PromptID, &eval.TargetModel, &eval.JudgeModel, &created, &updated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return EvaluationRecord{}, fmt.Errorf("evaluation not found")
+		}
+		return EvaluationRecord{}, fmt.Errorf("scan evaluation: %w", err)
+	}
+	eval.CreatedAt = parseLedgerTime(created)
+	eval.UpdatedAt = parseLedgerTime(updated)
+	return eval, nil
+}
+
+func scanEvaluationResultRecord(row ledgerScanner) (EvaluationResultRecord, error) {
+	var res EvaluationResultRecord
+	var created string
+	var passed int
+	if err := row.Scan(&res.ID, &res.EvaluationID, &res.DatasetItemID, &res.Score, &res.Rationale, &passed, &res.LatencyMS, &res.CostUSD, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return EvaluationResultRecord{}, fmt.Errorf("evaluation result not found")
+		}
+		return EvaluationResultRecord{}, fmt.Errorf("scan evaluation result: %w", err)
+	}
+	res.Passed = passed != 0
+	res.CreatedAt = parseLedgerTime(created)
+	return res, nil
+}
+
+func (s *SQLiteLedgerStore) GetDataset(ctx context.Context, id string) (DatasetRecord, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, schema_definition, source_type, created_at, updated_at FROM datasets WHERE id = ?`, id)
+	return scanDatasetRecord(row)
+}
+
+func (s *SQLiteLedgerStore) GetPrompt(ctx context.Context, id string) (PromptRecord, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, content, version, created_at, updated_at FROM prompts WHERE id = ?`, id)
+	return scanPromptRecord(row)
+}
+
+func (s *SQLiteLedgerStore) GetEvaluation(ctx context.Context, id string) (EvaluationRecord, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, dataset_id, prompt_id, target_model, judge_model, created_at, updated_at FROM evaluations WHERE id = ?`, id)
+	return scanEvaluationRecord(row)
+}
+
+func (s *SQLiteLedgerStore) ListDatasetItems(ctx context.Context, datasetID string) ([]DatasetItemRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, dataset_id, input_payload, target_output, status, created_at, updated_at FROM dataset_items WHERE dataset_id = ? ORDER BY created_at ASC`, datasetID)
+	if err != nil {
+		return nil, fmt.Errorf("query dataset items: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []DatasetItemRecord
+	for rows.Next() {
+		item, err := scanDatasetItemRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dataset items: %w", err)
+	}
+	return out, nil
+}
+
+func (s *SQLiteLedgerStore) ListEvaluationResults(ctx context.Context, evaluationID string) ([]EvaluationResultRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, evaluation_id, dataset_item_id, score, rationale, passed, latency_ms, cost_usd, created_at FROM evaluation_results WHERE evaluation_id = ? ORDER BY created_at ASC`, evaluationID)
+	if err != nil {
+		return nil, fmt.Errorf("query evaluation results: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []EvaluationResultRecord
+	for rows.Next() {
+		item, err := scanEvaluationResultRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate evaluation results: %w", err)
+	}
+	return out, nil
+}

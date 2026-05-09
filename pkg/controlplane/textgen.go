@@ -55,11 +55,32 @@ type ThreadTitleOutput struct {
 	Metadata map[string]any
 }
 
+type GenerateTextInput struct {
+	ModelSelection TextGenerationModelSelection
+	Prompt         string
+	SystemPrompt   string
+	ResponseFormat string
+	Metadata       map[string]any
+}
+
+type TokenLogprob struct {
+	Token   string
+	Logprob float64
+	Bytes   []byte
+}
+
+type GenerateTextOutput struct {
+	Text     string
+	Metadata map[string]any
+	Logprobs []TokenLogprob
+}
+
 type TextGenerationProvider interface {
 	GenerateCommitMessage(context.Context, CommitMessageInput) (*CommitMessageOutput, error)
 	GeneratePrContent(context.Context, PrContentInput) (*PrContentOutput, error)
 	GenerateBranchName(context.Context, BranchNameInput) (*BranchNameOutput, error)
 	GenerateThreadTitle(context.Context, ThreadTitleInput) (*ThreadTitleOutput, error)
+	GenerateText(context.Context, GenerateTextInput) (*GenerateTextOutput, error)
 }
 
 type TextGenerationModelSelection struct {
@@ -185,6 +206,16 @@ func (r *TextGenerationRouter) GenerateThreadTitle(ctx context.Context, provider
 	return provider.GenerateThreadTitle(ctx, input)
 }
 
+func (r *TextGenerationRouter) GenerateText(ctx context.Context, providerName string, input GenerateTextInput) (*GenerateTextOutput, error) {
+	input.ModelSelection.Provider = coalesceProvider(providerName, input.ModelSelection.Provider)
+	input.ModelSelection = r.ResolveSelection(input.ModelSelection)
+	provider, err := r.Route(input.ModelSelection.Provider)
+	if err != nil {
+		return nil, err
+	}
+	return provider.GenerateText(ctx, input)
+}
+
 func (r *TextGenerationRouter) GenerateCommitMessageForSelection(ctx context.Context, input CommitMessageInput) (*CommitMessageOutput, error) {
 	return r.GenerateCommitMessage(ctx, "", input)
 }
@@ -199,6 +230,10 @@ func (r *TextGenerationRouter) GenerateBranchNameForSelection(ctx context.Contex
 
 func (r *TextGenerationRouter) GenerateThreadTitleForSelection(ctx context.Context, input ThreadTitleInput) (*ThreadTitleOutput, error) {
 	return r.GenerateThreadTitle(ctx, "", input)
+}
+
+func (r *TextGenerationRouter) GenerateTextForSelection(ctx context.Context, input GenerateTextInput) (*GenerateTextOutput, error) {
+	return r.GenerateText(ctx, "", input)
 }
 
 func (r *TextGenerationRouter) resolveProviderName(selection TextGenerationModelSelection) string {
@@ -236,10 +271,6 @@ func providerCandidates(selection TextGenerationModelSelection, defaultProvider 
 
 func InferTextGenerationProvider(model string) string {
 	return InferRuntimeProvider(model)
-}
-
-func normalizeProviderName(value string) string {
-	return NormalizeRuntimeBackend(value)
 }
 
 func coalesceProvider(values ...string) string {

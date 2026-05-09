@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"strings"
 
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
@@ -19,31 +18,6 @@ type selectionFlags struct {
 	thinkingBudget  *int
 	variant         *string
 	agent           *string
-}
-
-func bindSelectionFlags(fs *flag.FlagSet, prefix string, label string) selectionFlags {
-	name := func(base string) string {
-		if prefix == "" {
-			return base
-		}
-		return prefix + base
-	}
-	providerLabel := label
-	if providerLabel == "" {
-		providerLabel = "typed selection"
-	}
-	return selectionFlags{
-		provider:        fs.String(name("provider"), "", providerLabel+" provider kind: codex, claude, gemini, opencode, pi"),
-		model:           fs.String(name("model-selection"), "", providerLabel+" model id or alias"),
-		reasoningEffort: fs.String(name("effort"), "", providerLabel+" reasoning effort"),
-		fastMode:        fs.Bool(name("fast-mode"), false, providerLabel+" fast mode"),
-		thinking:        fs.Bool(name("thinking"), false, providerLabel+" thinking toggle"),
-		contextWindow:   fs.String(name("context-window"), "", providerLabel+" context window option"),
-		thinkingLevel:   fs.String(name("thinking-level-selection"), "", providerLabel+" thinking level"),
-		thinkingBudget:  fs.Int(name("thinking-budget-selection"), 0, providerLabel+" thinking budget"),
-		variant:         fs.String(name("variant"), "", providerLabel+" OpenCode variant"),
-		agent:           fs.String(name("agent"), "", providerLabel+" OpenCode agent"),
-	}
 }
 
 func (s selectionFlags) build() *contract.ModelSelection {

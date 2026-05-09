@@ -112,13 +112,14 @@ func (n rpcNotification) MarshalJSON() ([]byte, error) {
 }
 
 type startSessionParams struct {
-	Runtime      string           `json:"runtime"`
-	SessionID    string           `json:"session_id,omitempty"`
-	CWD          string           `json:"cwd,omitempty"`
-	Model        string           `json:"model,omitempty"`
-	ModelOptions api.ModelOptions `json:"model_options,omitempty"`
-	Prompt       string           `json:"prompt,omitempty"`
-	Metadata     map[string]any   `json:"metadata,omitempty"`
+	Runtime        string           `json:"runtime"`
+	SessionID      string           `json:"session_id,omitempty"`
+	CWD            string           `json:"cwd,omitempty"`
+	Model          string           `json:"model,omitempty"`
+	ModelOptions   api.ModelOptions `json:"model_options,omitempty"`
+	Prompt         string           `json:"prompt,omitempty"`
+	Metadata       map[string]any   `json:"metadata,omitempty"`
+	ResponseSchema map[string]any   `json:"response_schema,omitempty"`
 }
 
 type resumeSessionParams struct {
@@ -129,12 +130,14 @@ type resumeSessionParams struct {
 	Model             string           `json:"model,omitempty"`
 	ModelOptions      api.ModelOptions `json:"model_options,omitempty"`
 	Metadata          map[string]any   `json:"metadata,omitempty"`
+	ResponseSchema    map[string]any   `json:"response_schema,omitempty"`
 }
 
 type sendInputParams struct {
-	SessionID string         `json:"session_id"`
-	Text      string         `json:"text"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	SessionID string                 `json:"session_id"`
+	Text      string                 `json:"text"`
+	Parts     []contract.ContentPart `json:"parts,omitempty"`
+	Metadata  map[string]any         `json:"metadata,omitempty"`
 }
 
 type getSessionParams struct {
@@ -425,19 +428,20 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				continue
 			}
 			result, err := s.service.StartSession(ctx, params.Runtime, api.StartSessionRequest{
-				SessionID:    params.SessionID,
-				CWD:          params.CWD,
-				Model:        params.Model,
-				ModelOptions: params.ModelOptions,
-				Prompt:       params.Prompt,
-				Metadata:     params.Metadata,
+				SessionID:      params.SessionID,
+				CWD:            params.CWD,
+				Model:          params.Model,
+				ModelOptions:   params.ModelOptions,
+				Prompt:         params.Prompt,
+				Metadata:       params.Metadata,
+				ResponseSchema: params.ResponseSchema,
 			})
 			if err != nil {
 				_ = writer.writeJSON(errorResponse(request.ID, err))
 				continue
 			}
 			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
-		case "session.resume":
+		case "session.resume", "session/load":
 			var params resumeSessionParams
 			if err := unmarshalParams(request.Params, &params); err != nil {
 				_ = writer.writeJSON(errorResponse(request.ID, err))
@@ -450,6 +454,7 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				Model:             params.Model,
 				ModelOptions:      params.ModelOptions,
 				Metadata:          params.Metadata,
+				ResponseSchema:    params.ResponseSchema,
 			})
 			if err != nil {
 				_ = writer.writeJSON(errorResponse(request.ID, err))
@@ -465,6 +470,7 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 			result, err := s.service.SendInput(ctx, api.SendInputRequest{
 				SessionID: params.SessionID,
 				Text:      params.Text,
+				Parts:     params.Parts,
 				Metadata:  params.Metadata,
 			})
 			if err != nil {
@@ -1051,12 +1057,7 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 				_ = writer.writeJSON(errorResponse(request.ID, err))
 				continue
 			}
-			result := s.service.ListAttention(AttentionListFilter{
-				Status:    params.Status,
-				Action:    params.Action,
-				SessionID: params.SessionID,
-				Limit:     params.Limit,
-			})
+			result := s.service.ListAttention(AttentionListFilter(params))
 			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
 		case "attention.update":
 			var params attentionUpdateParams
@@ -1077,6 +1078,14 @@ func (s *RPCServer) handleConnection(ctx context.Context, connection net.Conn) {
 			}
 			_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
 		default:
+			if result, handled, err := s.handleWorkspaceRequest(ctx, request.Method, request.Params); handled {
+				if err != nil {
+					_ = writer.writeJSON(errorResponse(request.ID, err))
+				} else {
+					_ = writer.writeJSON(rpcResponse{ID: request.ID, Result: result})
+				}
+				continue
+			}
 			_ = writer.writeJSON(errorResponseWithCode(request.ID, -32601, fmt.Sprintf("unknown method: %s", request.Method)))
 		}
 	}

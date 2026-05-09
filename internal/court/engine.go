@@ -377,10 +377,6 @@ func (e *Engine) validateBackend(backend string) error {
 	return err
 }
 
-func (e *Engine) supportedBackends() []string {
-	return api.SupportedSessionBackends(e.controlPlane.Describe().Runtimes)
-}
-
 // RuntimeDescriptors returns the current agentic-control runtime descriptors.
 func (e *Engine) RuntimeDescriptors() []contract.RuntimeDescriptor {
 	return e.controlPlane.Describe().Runtimes
@@ -1026,8 +1022,8 @@ func finalVerdict(workers []Worker) string {
 
 func renderedWorkerResult(worker Worker) string {
 	if strings.TrimSpace(worker.ResultJSON) != "" {
-		rendered, _, ok := parseWorkerResult(worker.ResultJSON)
-		if ok {
+		rendered, _, err := parseWorkerResult(worker.ResultJSON)
+		if err == nil {
 			return rendered
 		}
 	}

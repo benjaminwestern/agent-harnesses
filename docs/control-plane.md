@@ -126,6 +126,20 @@ partial typed product surface:
 The interaction layer is in the control-plane core as an execution substrate
 and bridge, with selected workflows promoted into typed CLI and RPC surfaces.
 
+The web and Wails app host adds one product policy above the raw TTS calls:
+voice allocation is stateful per project and agent. Operators can pin
+`project + agent -> voice` rules, and the host refuses to let two live agents
+share a voice. Notification audio is exposed separately from speech so agents
+can request visual attention with `notification.audio.play` when the user needs
+to look at something rather than only hear it.
+
+The UI itself is path-addressable instead of configuration-led. `/agents` is
+the default workspace, with resource paths for `/agents/{session_id}`,
+`/court/{workflow_id}`, and `/runs/{run_id}`. `/voices`, `/attention`, `/rpc`,
+and `/logs` expose the supporting operational surfaces. The web host serves the
+embedded React entry point for every non-API path, so those addresses work on
+first load as well as after in-app navigation.
+
 The socket server lives in
 [`cmd/agent-control/main.go`](../cmd/agent-control/main.go), the service and
 registry live in [`internal/controlplane/`](../internal/controlplane), and the
@@ -356,6 +370,7 @@ Example request:
 ```
 
 `model_options` is intentionally generic. Providers ignore unsupported fields.
+For JSON enforcement, you can pass a JSON schema definition via `response_schema`. For math-based scoring like G-Eval, you can pass `logprobs: true` and `top_logprobs: 5`.
 Gemini uses `thinking_level` for Gemini 3 models and `thinking_budget` for
 Gemini 2.5 models. For example:
 
@@ -365,7 +380,7 @@ Gemini 2.5 models. For example:
   "method": "session.start",
   "params": {
     "runtime": "gemini",
-    "session_id": "gemini-research-1",
+    "session_id": "gemini-worker-1",
     "cwd": "/workspace/repo",
     "model": "gemini-2.5-pro",
     "model_options": {

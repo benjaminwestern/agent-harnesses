@@ -33,6 +33,12 @@ const (
 	EventRuntimeStderr           = "runtime.stderr"
 )
 
+const (
+	PayloadExtractedTools = "extracted_tools"
+	PayloadInputText      = "input_text"
+	PayloadInputParts     = "input_parts"
+)
+
 type TokenUsage struct {
 	InputTokens     int64 `json:"input_tokens,omitempty"`
 	OutputTokens    int64 `json:"output_tokens,omitempty"`
@@ -182,6 +188,33 @@ func EventTokenUsage(event RuntimeEvent) (TokenUsage, bool) {
 		return usage, true
 	}
 	return tokenUsageFromValue(event.Payload)
+}
+
+type TokenLogprob struct {
+	Token       string         `json:"token"`
+	Logprob     float64        `json:"logprob"`
+	Bytes       []byte         `json:"bytes,omitempty"`
+	TopLogprobs []TokenLogprob `json:"top_logprobs,omitempty"`
+}
+
+func EventLogprobs(event RuntimeEvent) ([]TokenLogprob, bool) {
+	if event.Payload == nil {
+		return nil, false
+	}
+	raw, ok := event.Payload["logprobs"]
+	if !ok {
+		return nil, false
+	}
+	// Try parsing it
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, false
+	}
+	var logprobs []TokenLogprob
+	if err := json.Unmarshal(b, &logprobs); err != nil {
+		return nil, false
+	}
+	return logprobs, true
 }
 
 func EventCostUSD(event RuntimeEvent) (float64, bool) {

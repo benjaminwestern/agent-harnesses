@@ -117,7 +117,7 @@ Reduction commands additionally return:
 - a reducer session;
 - reducer token usage;
 - reducer cost where available;
-- reduced structured output for compare, summarize, or best-of-N.
+- reduced structured output for compare, summarize, best-of-N, or formal evaluation modes (`evaluate` / `g_eval`).
 
 When used with `--keep-sessions` and a daemon `--socket-path`, the resulting
 threads can be:
@@ -141,4 +141,6 @@ This flow proves the intended layering:
 2. Add per-target status streaming in the shell.
 3. Surface recorded token usage and cost estimates more prominently.
 4. Add target labels and richer reducer prompts if feature-development flows need
+   more review structure.
+abels and richer reducer prompts if feature-development flows need
    more review structure.

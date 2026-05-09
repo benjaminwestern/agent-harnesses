@@ -22,7 +22,7 @@ type markdownDoc struct {
 	Body        string
 }
 
-// Jury defines Court runtime data.
+// Jury describes a named set of Court roles.
 type Jury struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
@@ -32,7 +32,7 @@ type Jury struct {
 	JudgeID     string   `json:"judge_id,omitempty"`
 }
 
-// AgentConfig defines Court runtime data.
+// AgentConfig describes the runtime target defaults for a Court agent.
 type AgentConfig struct {
 	ID           string                          `json:"id"`
 	Title        string                          `json:"title,omitempty"`
@@ -43,12 +43,12 @@ type AgentConfig struct {
 	Backends     map[string]RuntimeBackendConfig `json:"backends,omitempty"`
 }
 
-// LoadPreset provides Court runtime functionality.
+// LoadPreset resolves a preset from the default Court roots.
 func LoadPreset(rootDir string, id string) (Preset, bool, error) {
 	return LoadPresetFromRoots([]string{rootDir}, id)
 }
 
-// LoadPresetFromRoots provides Court runtime functionality.
+// LoadPresetFromRoots resolves a preset from config or markdown Court roots.
 func LoadPresetFromRoots(rootDirs []string, id string) (Preset, bool, error) {
 	if id == "" {
 		return Preset{}, false, nil
@@ -125,12 +125,12 @@ func LoadPresetFromRoots(rootDirs []string, id string) (Preset, bool, error) {
 	}, true, nil
 }
 
-// ListMarkdownPresets provides Court runtime functionality.
+// ListMarkdownPresets returns presets from a single Court catalog root.
 func ListMarkdownPresets(rootDir string) ([]Preset, error) {
 	return ListMarkdownPresetsFromRoots([]string{rootDir})
 }
 
-// ListMarkdownPresetsFromRoots provides Court runtime functionality.
+// ListMarkdownPresetsFromRoots returns config and markdown presets from Court roots.
 func ListMarkdownPresetsFromRoots(rootDirs []string) ([]Preset, error) {
 	rootDirs = cleanPathList(rootDirs)
 	configPresets, err := ListConfigPresetsFromRoots(rootDirs)
@@ -181,12 +181,12 @@ func ListMarkdownPresetsFromRoots(rootDirs []string) ([]Preset, error) {
 	return out, nil
 }
 
-// LoadJury provides Court runtime functionality.
+// LoadJury resolves a jury from the default Court roots.
 func LoadJury(rootDir string, id string) (Jury, bool, error) {
 	return LoadJuryFromRoots([]string{rootDir}, id)
 }
 
-// LoadJuryFromRoots provides Court runtime functionality.
+// LoadJuryFromRoots resolves a jury from config or markdown Court roots.
 func LoadJuryFromRoots(rootDirs []string, id string) (Jury, bool, error) {
 	if id == "" {
 		return Jury{}, false, nil
@@ -216,7 +216,7 @@ func LoadJuryFromRoots(rootDirs []string, id string) (Jury, bool, error) {
 	}, true, nil
 }
 
-// ListJuriesFromRoots provides Court runtime functionality.
+// ListJuriesFromRoots returns all juries declared in config or markdown roots.
 func ListJuriesFromRoots(rootDirs []string) ([]Jury, error) {
 	rootDirs = cleanPathList(rootDirs)
 	config, err := LoadCourtConfigFromRoots(rootDirs)
@@ -257,12 +257,12 @@ func ListJuriesFromRoots(rootDirs []string) ([]Jury, error) {
 	return out, nil
 }
 
-// LoadRole provides Court runtime functionality.
+// LoadRole resolves a role from the default Court roots.
 func LoadRole(rootDir string, id string) (Role, bool, error) {
 	return LoadRoleFromRoots([]string{rootDir}, id)
 }
 
-// LoadRoleFromRoots provides Court runtime functionality.
+// LoadRoleFromRoots resolves a role from config or markdown Court roots.
 func LoadRoleFromRoots(rootDirs []string, id string) (Role, bool, error) {
 	rootDirs = cleanPathList(rootDirs)
 	if role, ok, err := LoadConfigRoleFromRoots(rootDirs, id); err != nil {
@@ -311,7 +311,7 @@ func LoadRoleFromRoots(rootDirs []string, id string) (Role, bool, error) {
 	}, true, nil
 }
 
-// ListRolesFromRoots provides Court runtime functionality.
+// ListRolesFromRoots returns all roles declared in config or markdown roots.
 func ListRolesFromRoots(rootDirs []string) ([]Role, error) {
 	rootDirs = cleanPathList(rootDirs)
 	config, err := LoadCourtConfigFromRoots(rootDirs)
@@ -360,7 +360,7 @@ func ListRolesFromRoots(rootDirs []string) ([]Role, error) {
 	return out, nil
 }
 
-// LoadAgentModel provides Court runtime functionality.
+// LoadAgentModel resolves the configured model for a Court agent.
 func LoadAgentModel(rootDir string, id string) (string, bool, error) {
 	config, ok, err := LoadAgentConfig(rootDir, id)
 	if err != nil || !ok {
@@ -369,12 +369,12 @@ func LoadAgentModel(rootDir string, id string) (string, bool, error) {
 	return config.Model, config.Model != "", nil
 }
 
-// LoadAgentConfig provides Court runtime functionality.
+// LoadAgentConfig resolves an agent config from the default Court roots.
 func LoadAgentConfig(rootDir string, id string) (AgentConfig, bool, error) {
 	return LoadAgentConfigFromRoots([]string{rootDir}, id)
 }
 
-// LoadAgentConfigFromRoots provides Court runtime functionality.
+// LoadAgentConfigFromRoots resolves an agent config from config or markdown Court roots.
 func LoadAgentConfigFromRoots(rootDirs []string, id string) (AgentConfig, bool, error) {
 	rootDirs = cleanPathList(rootDirs)
 	if config, ok, err := LoadConfigAgentFromRoots(rootDirs, id); err != nil {
@@ -404,6 +404,50 @@ func LoadAgentConfigFromRoots(rootDirs []string, id string) (AgentConfig, bool, 
 		Backends:     backends,
 	}
 	return config, config.Model != "" || config.Backend != "" || config.Provider != "" || len(config.Backends) > 0, nil
+}
+
+// ListAgentConfigsFromRoots returns all agent configs declared in Court roots.
+func ListAgentConfigsFromRoots(rootDirs []string) ([]AgentConfig, error) {
+	rootDirs = cleanPathList(rootDirs)
+	config, err := LoadCourtConfigFromRoots(rootDirs)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[string]struct{}{}
+	for id := range config.Agents {
+		ids[id] = struct{}{}
+	}
+	for _, rootDir := range rootDirs {
+		dir := filepath.Join(rootDir, "agents")
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, wrapErr("read agent catalog directory", err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != markdownExtension {
+				continue
+			}
+			ids[strings.TrimSuffix(entry.Name(), markdownExtension)] = struct{}{}
+		}
+	}
+	names := sortedKeys(ids)
+	out := make([]AgentConfig, 0, len(names))
+	for _, id := range names {
+		agent, ok, err := LoadAgentConfigFromRoots(rootDirs, id)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, agent)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 func loadPresetJury(rootDirs []string, doc markdownDoc) (Jury, error) {

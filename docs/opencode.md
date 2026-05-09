@@ -76,6 +76,7 @@ The OpenCode controller supports:
 - interrupt
 - respond to permission requests
 - respond to user-input requests
+- support for multimodal ContentParts (images, audio, files)
 - list active controller-owned sessions
 - stop
 

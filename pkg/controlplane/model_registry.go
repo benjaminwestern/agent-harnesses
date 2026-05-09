@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/benjaminwestern/agentic-control/internal/controlplane/modelcatalog"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
+	"github.com/benjaminwestern/agentic-control/pkg/providers/modelcatalog"
 )
 
 var defaultModelByBackend = map[string]string{
@@ -111,6 +111,11 @@ func ValidateSessionTargetWithRegistry(registry contract.ModelRegistry, target R
 	}
 	result.Target.Model = model.ID
 	result.Target.Provider = firstNonEmpty(result.Target.Provider, NormalizeRuntimeProvider(model.Provider), backend.DefaultProvider)
+
+	if len(model.DefaultOptions) > 0 {
+		result.Target.Options = mergeOptionsWithMap(result.Target.Options, model.DefaultOptions)
+	}
+
 	if result.Target.Provider != "" && model.Provider != "" && result.Target.Provider != NormalizeRuntimeProvider(model.Provider) {
 		result.Issues = append(result.Issues, RuntimeValidationIssue{
 			Severity: ValidationSeverityError,
@@ -121,6 +126,56 @@ func ValidateSessionTargetWithRegistry(registry contract.ModelRegistry, target R
 	result.Model = model
 	result.Issues = append(result.Issues, validateRuntimeModelOptions(result.Target, *model)...)
 	return result
+}
+
+func mergeOptionsWithMap(opts ModelOptions, defaults map[string]any) ModelOptions {
+	if opts.ReasoningEffort == "" {
+		if v, ok := defaults["reasoning_effort"].(string); ok {
+			opts.ReasoningEffort = v
+		}
+	}
+	if opts.ThinkingLevel == "" {
+		if v, ok := defaults["thinking_level"].(string); ok {
+			opts.ThinkingLevel = v
+		}
+	}
+	if opts.ThinkingBudget == nil {
+		if v, ok := defaults["thinking_budget"].(int64); ok {
+			budget := int(v)
+			opts.ThinkingBudget = &budget
+		} else if v, ok := defaults["thinking_budget"].(float64); ok {
+			budget := int(v)
+			opts.ThinkingBudget = &budget
+		} else if v, ok := defaults["thinking_budget"].(int); ok {
+			opts.ThinkingBudget = &v
+		}
+	}
+	if opts.BaseURL == "" {
+		if v, ok := defaults["base_url"].(string); ok {
+			opts.BaseURL = v
+		}
+	}
+	if opts.APIKey == "" {
+		if v, ok := defaults["api_key"].(string); ok {
+			opts.APIKey = v
+		}
+	}
+	if opts.OAuthTokenURL == "" {
+		if v, ok := defaults["oauth_token_url"].(string); ok {
+			opts.OAuthTokenURL = v
+		}
+	}
+	if opts.OAuthClientID == "" {
+		if v, ok := defaults["oauth_client_id"].(string); ok {
+			opts.OAuthClientID = v
+		}
+	}
+	if opts.OAuthClientSecret == "" {
+		if v, ok := defaults["oauth_client_secret"].(string); ok {
+			opts.OAuthClientSecret = v
+		}
+	}
+	return opts
 }
 
 func buildBackendRegistry(descriptor contract.RuntimeDescriptor) contract.RuntimeBackendRegistry {
@@ -384,6 +439,9 @@ func providerDisplayName(provider string) string {
 	case "gemini":
 		return "Gemini"
 	default:
+		if provider == "" {
+			return ""
+		}
 		return strings.ToUpper(provider[:1]) + provider[1:]
 	}
 }

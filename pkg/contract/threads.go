@@ -68,6 +68,8 @@ type ThreadTurn struct {
 	Status        ThreadTurnStatus `json:"status"`
 	Summary       string           `json:"summary,omitempty"`
 	AssistantText string           `json:"assistant_text,omitempty"`
+	ReasoningText string           `json:"reasoning_text,omitempty"`
+	Messages      []Message        `json:"messages,omitempty"`
 	StartedAtMS   int64            `json:"started_at_ms,omitempty"`
 	CompletedAtMS int64            `json:"completed_at_ms,omitempty"`
 	EventCount    int              `json:"event_count,omitempty"`

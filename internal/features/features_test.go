@@ -1,14 +1,11 @@
 package features
 
-import (
-	"os"
-	"testing"
-)
+import "testing"
 
 func TestFromMap(t *testing.T) {
 	m := map[string]any{
-		"verbose_logging":    true,
-		"parallel_execution": "true",
+		"verbose_logging":       true,
+		"parallel_execution":    "true",
 		"experimental_provider": 1, // Invalid, should be false
 	}
 
@@ -26,8 +23,7 @@ func TestFromMap(t *testing.T) {
 }
 
 func TestEnvironmentOverrides(t *testing.T) {
-	os.Setenv("AC_FEATURE_VERBOSE_LOGGING", "true")
-	defer os.Unsetenv("AC_FEATURE_VERBOSE_LOGGING")
+	t.Setenv("AC_FEATURE_VERBOSE_LOGGING", "true")
 
 	m := map[string]any{
 		"verbose_logging": false,

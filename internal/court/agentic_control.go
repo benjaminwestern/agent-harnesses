@@ -11,7 +11,6 @@ import (
 	"github.com/benjaminwestern/agentic-control/internal/orchestration"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
-	"github.com/benjaminwestern/agentic-control/pkg/features"
 )
 
 // RuntimeControlPlane defines the runtime boundary Court depends on.
@@ -33,9 +32,6 @@ type RuntimeControlPlane interface {
 var errMissingStructuredResult = api.ErrMissingStructuredResult
 
 func (e *Engine) runAgenticControlWorker(ctx context.Context, run Run, worker Worker) (string, string, RuntimeIdentity, error) {
-	if features.Check(features.ExperimentalUI) {
-		// Example feature flag check
-	}
 	role, err := e.roleForWorker(run, worker.RoleID)
 	if err != nil {
 		return "", "", RuntimeIdentity{}, err
@@ -47,12 +43,13 @@ func (e *Engine) runAgenticControlWorker(ctx context.Context, run Run, worker Wo
 
 	var identity RuntimeIdentity
 	result, err := api.RunStructuredSession(ctx, e.controlPlane, worker.Backend, api.StartSessionRequest{
-		SessionID:    worker.LaunchID,
-		CWD:          run.Workspace,
-		Model:        worker.Model,
-		ModelOptions: worker.ModelOptions,
-		Prompt:       prompt,
-		Metadata:     workerRuntimeMetadata(run, worker),
+		SessionID:      worker.LaunchID,
+		CWD:            run.Workspace,
+		Model:          worker.Model,
+		ModelOptions:   worker.ModelOptions,
+		Prompt:         prompt,
+		Metadata:       workerRuntimeMetadata(run, worker),
+		ResponseSchema: WorkerResultSchema(),
 	}, api.StructuredSessionOptions{
 		Extract:        firstStructuredResult,
 		RepairPrompt:   structuredResultRepairPrompt(worker),
@@ -180,8 +177,9 @@ func workerRepairRuntimeMetadata(run Run, worker Worker) map[string]any {
 	return api.MetadataForNoToolTurn(workerRuntimeMetadata(run, worker))
 }
 
-func firstStructuredResult(values ...string) (string, string) {
+func firstStructuredResult(values ...string) (string, string, error) {
 	var fallback string
+	var lastErr error
 	for _, value := range values {
 		if strings.TrimSpace(value) == "" {
 			continue
@@ -189,12 +187,15 @@ func firstStructuredResult(values ...string) (string, string) {
 		if fallback == "" {
 			fallback = value
 		}
-		result, resultJSON := readResultFromOutput(value)
-		if resultJSON != "" {
-			return result, resultJSON
+		result, resultJSON, err := readResultFromOutput(value)
+		if err == nil && resultJSON != "" {
+			return result, resultJSON, nil
+		}
+		if err != nil {
+			lastErr = err
 		}
 	}
-	return strings.TrimSpace(fallback), ""
+	return strings.TrimSpace(fallback), "", lastErr
 }
 
 func (e *Engine) handlePendingWorkerControls(ctx context.Context, run Run, worker Worker, sessionID string) error {

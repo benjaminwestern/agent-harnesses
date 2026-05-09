@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
 	interactionrpc "github.com/benjaminwestern/agentic-control/pkg/interaction"
+	"github.com/benjaminwestern/agentic-control/pkg/toolrepair"
 )
 
 type Service struct {
@@ -29,11 +31,16 @@ type Service struct {
 	interactionSubMu sync.Mutex
 	eventLogger      *EventLogger
 	threads          *ThreadStore
+	workspace        *WorkspaceStore
 	sttMu            sync.Mutex
 	sttSubscription  *interactionrpc.Subscription
 	sttRoute         speechRouteConfig
 	speechResponseMu sync.Mutex
 	speechResponses  map[string]*speechResponseTurn
+	turnTextMu       sync.Mutex
+	turnTextBuffers  map[string]string
+	textGenRouter    *api.TextGenerationRouter
+	embeddingRouter  *api.EmbeddingRouter
 }
 
 type closeProvider interface {
@@ -52,17 +59,45 @@ func NewService(providers ...api.Provider) *Service {
 		interactionSubs: make(map[string]nativeSubscription),
 		operationLocks:  make(map[string]*sync.Mutex),
 		speechResponses: make(map[string]*speechResponseTurn),
+		turnTextBuffers: make(map[string]string),
 	}
 	if store, err := NewThreadStoreFromEnv(); err == nil {
 		service.threads = store
 	}
+	if store, err := NewWorkspaceStoreFromEnv(); err == nil {
+		service.workspace = store
+	}
 	if logger, err := NewEventLoggerFromEnv(); err == nil {
 		service.eventLogger = logger
 	}
+
+	textGenProviders := make(map[string]api.TextGenerationProvider)
+	embeddingProviders := make(map[string]api.EmbeddingProvider)
 	for _, provider := range providers {
 		service.providers[provider.Runtime()] = provider
+		if textGen, ok := provider.(api.TextGenerationProvider); ok {
+			textGenProviders[provider.Runtime()] = textGen
+		}
+		if embeddings, ok := provider.(api.EmbeddingProvider); ok {
+			embeddingProviders[provider.Runtime()] = embeddings
+		}
 	}
+	service.textGenRouter = api.NewTextGenerationRouter("codex", textGenProviders)
+	service.embeddingRouter = api.NewEmbeddingRouter("openai-compatible", embeddingProviders)
+
 	return service
+}
+
+func (s *Service) TextGen() *api.TextGenerationRouter {
+	return s.textGenRouter
+}
+
+func (s *Service) Embeddings() *api.EmbeddingRouter {
+	return s.embeddingRouter
+}
+
+func (s *Service) Workspace() *WorkspaceStore {
+	return s.workspace
 }
 
 func (s *Service) Close() error {
@@ -72,6 +107,7 @@ func (s *Service) Close() error {
 		providers = append(providers, provider)
 	}
 	threads := s.threads
+	workspace := s.workspace
 	eventLogger := s.eventLogger
 	s.mu.RUnlock()
 
@@ -90,6 +126,11 @@ func (s *Service) Close() error {
 			errs = append(errs, fmt.Errorf("close thread store: %w", err))
 		}
 	}
+	if workspace != nil {
+		if err := workspace.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close workspace store: %w", err))
+		}
+	}
 	if eventLogger != nil {
 		if err := eventLogger.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close event logger: %w", err))
@@ -102,6 +143,9 @@ func (s *Service) PublishEvent(event contract.RuntimeEvent) {
 	if s.eventLogger != nil {
 		_ = s.eventLogger.Write(event)
 	}
+
+	event = s.repairToolCalls(event)
+
 	s.directory.UpdateFromEvent(event)
 	s.ledger.UpdateFromEvent(event)
 	if s.threads != nil {
@@ -117,6 +161,97 @@ func (s *Service) PublishEvent(event contract.RuntimeEvent) {
 	}
 	s.events.Publish(event)
 	s.handleSpeechResponseEvent(event)
+}
+
+func (s *Service) repairToolCalls(event contract.RuntimeEvent) contract.RuntimeEvent {
+	key, ok := toolRepairBufferKey(event)
+	if !ok {
+		return event
+	}
+
+	switch event.EventType {
+	case contract.EventAssistantMessageDelta:
+		if delta := contract.EventDeltaText(event); delta != "" {
+			s.turnTextMu.Lock()
+			s.turnTextBuffers[key] += delta
+			s.turnTextMu.Unlock()
+		}
+	case contract.EventTurnCompleted:
+		s.turnTextMu.Lock()
+		text := s.turnTextBuffers[key]
+		delete(s.turnTextBuffers, key)
+		s.turnTextMu.Unlock()
+
+		if text == "" {
+			return event
+		}
+		tools := contractToolCallsFromRepair(text)
+		if len(tools) == 0 {
+			return event
+		}
+		if event.Payload == nil {
+			event.Payload = map[string]any{}
+		}
+		event.Payload[contract.PayloadExtractedTools] = tools
+	case contract.EventTurnErrored, contract.EventTurnInterrupted:
+		s.turnTextMu.Lock()
+		delete(s.turnTextBuffers, key)
+		s.turnTextMu.Unlock()
+	case contract.EventSessionErrored, contract.EventSessionStopped:
+		s.clearToolRepairBuffersForSession(event)
+	}
+	return event
+}
+
+func toolRepairBufferKey(event contract.RuntimeEvent) (string, bool) {
+	sessionID := strings.TrimSpace(event.SessionID)
+	providerSessionID := strings.TrimSpace(event.ProviderSessionID)
+	turnID := strings.TrimSpace(event.TurnID)
+	if sessionID == "" && providerSessionID == "" && turnID == "" {
+		return "", false
+	}
+	if turnID == "" {
+		turnID = "_active"
+	}
+	return strings.Join([]string{strings.TrimSpace(event.Runtime), sessionID, providerSessionID, turnID}, "\x00"), true
+}
+
+func (s *Service) clearToolRepairBuffersForSession(event contract.RuntimeEvent) {
+	sessionID := strings.TrimSpace(event.SessionID)
+	providerSessionID := strings.TrimSpace(event.ProviderSessionID)
+	if sessionID == "" && providerSessionID == "" {
+		return
+	}
+	s.turnTextMu.Lock()
+	defer s.turnTextMu.Unlock()
+	for key := range s.turnTextBuffers {
+		parts := strings.Split(key, "\x00")
+		if len(parts) != 4 {
+			continue
+		}
+		if (sessionID != "" && parts[1] == sessionID) || (providerSessionID != "" && parts[2] == providerSessionID) {
+			delete(s.turnTextBuffers, key)
+		}
+	}
+}
+
+func contractToolCallsFromRepair(text string) []contract.ToolCall {
+	extracted := toolrepair.ExtractToolCalls(text)
+	tools := make([]contract.ToolCall, 0, len(extracted))
+	for _, item := range extracted {
+		if strings.TrimSpace(item.Name) == "" {
+			continue
+		}
+		tools = append(tools, contract.ToolCall{
+			ID:   item.ID,
+			Type: "function",
+			Function: contract.FunctionCall{
+				Name:      strings.TrimSpace(item.Name),
+				Arguments: item.Arguments,
+			},
+		})
+	}
+	return tools
 }
 
 func (s *Service) SubscribeEvents(buffer int) (<-chan contract.RuntimeEvent, func()) {
@@ -169,6 +304,32 @@ func (s *Service) Describe() contract.SystemDescriptor {
 			"session.respond",
 			"session.stop",
 			"session.list",
+			"memory.set",
+			"memory.get",
+			"memory.delete",
+			"memory.list",
+			"documents.write",
+			"documents.get",
+			"documents.delete",
+			"documents.list",
+			"tasks.create",
+			"tasks.get",
+			"tasks.update",
+			"tasks.delete",
+			"tasks.list",
+			"tasks.comments.create",
+			"tasks.comments.list",
+			"wakeups.set",
+			"wakeups.get",
+			"wakeups.cancel",
+			"wakeups.pause",
+			"wakeups.resume",
+			"wakeups.reset",
+			"wakeups.list_pending",
+			"leases.acquire",
+			"leases.release",
+			"leases.reset",
+			"leases.get",
 			"interaction.call",
 			"interaction.subscribe",
 			"interaction.unsubscribe",
@@ -250,6 +411,7 @@ func (s *Service) StartSession(
 	if request.SessionID == "" {
 		request.SessionID = newIdentifier("session")
 	}
+	request.Normalize()
 
 	var session *contract.RuntimeSession
 	err = s.withSessionLock(request.SessionID, func() error {
@@ -277,6 +439,7 @@ func (s *Service) ResumeSession(
 	if request.SessionID == "" {
 		request.SessionID = newIdentifier("session")
 	}
+	request.Normalize()
 
 	var session *contract.RuntimeSession
 	err = s.withSessionLock(request.SessionID, func() error {
@@ -296,6 +459,9 @@ func (s *Service) SendInput(
 	ctx context.Context,
 	request api.SendInputRequest,
 ) (*contract.RuntimeEvent, error) {
+	if err := contract.ValidateContentParts(request.Parts); err != nil {
+		return nil, err
+	}
 	provider, err := s.providerBySession(ctx, request.SessionID)
 	if err != nil {
 		return nil, err
@@ -667,26 +833,54 @@ func (s *Service) ReadThread(ctx context.Context, threadID string) (*contract.Th
 func deriveThreadTurns(events []contract.ThreadEvent) []contract.ThreadTurn {
 	turns := map[string]*contract.ThreadTurn{}
 	order := make([]string, 0)
+	activeSyntheticTurns := map[string]string{}
+	syntheticTurnSeq := 0
+
 	for _, event := range events {
-		if strings.TrimSpace(event.TurnID) == "" {
+		turnID, syntheticScope := resolveThreadTurnID(event, activeSyntheticTurns, &syntheticTurnSeq)
+		if turnID == "" {
 			continue
 		}
-		turn, ok := turns[event.TurnID]
+		turn, ok := turns[turnID]
 		if !ok {
-			turn = &contract.ThreadTurn{TurnID: event.TurnID, Status: contract.ThreadTurnRunning, StartedAtMS: event.RecordedAtMS}
-			turns[event.TurnID] = turn
-			order = append(order, event.TurnID)
+			turn = &contract.ThreadTurn{TurnID: turnID, Status: contract.ThreadTurnRunning, StartedAtMS: event.RecordedAtMS}
+			turns[turnID] = turn
+			order = append(order, turnID)
 		}
 		turn.EventCount++
 		if event.RequestID != "" && !containsThreadString(turn.RequestIDs, event.RequestID) {
 			turn.RequestIDs = append(turn.RequestIDs, event.RequestID)
 		}
-		if text := contract.EventDeltaText(event.Event); text != "" {
-			turn.AssistantText += text
+		if event.EventType == contract.EventTurnStarted {
+			if msg, ok := userMessageFromTurnStarted(event); ok && !hasRoleMessage(turn.Messages, contract.MessageRoleUser) {
+				turn.Messages = append(turn.Messages, msg)
+			}
+		}
+		if text := threadDeltaText(event.Event); text != "" {
+			if event.EventType == contract.EventAssistantThoughtDelta {
+				turn.ReasoningText += text
+				appendAssistantPart(turn, contract.ContentPartTypeReasoning, text)
+			} else {
+				turn.AssistantText += text
+				appendAssistantPart(turn, contract.ContentPartTypeText, text)
+			}
 		}
 		if final := contract.EventFinalText(event.Event); final != "" {
 			turn.AssistantText = final
+			if !hasAssistantParts(turn) {
+				appendAssistantPart(turn, contract.ContentPartTypeText, final)
+			}
 		}
+
+		if event.EventType == contract.EventTurnCompleted && event.Event.Payload != nil {
+			if tools := threadToolCallsFromPayload(event.Event.Payload[contract.PayloadExtractedTools]); len(tools) > 0 {
+				appendAssistantToolCalls(turn, tools)
+			}
+		}
+		if msg, ok := toolMessageFromThreadEvent(event); ok {
+			turn.Messages = append(turn.Messages, msg)
+		}
+
 		switch event.EventType {
 		case contract.EventTurnCompleted:
 			turn.Status = contract.ThreadTurnCompleted
@@ -701,12 +895,261 @@ func deriveThreadTurns(events []contract.ThreadEvent) []contract.ThreadTurn {
 			turn.CompletedAtMS = event.RecordedAtMS
 			turn.Summary = firstThreadString(event.Summary, turn.Summary)
 		}
+		if syntheticScope != "" && (contract.IsTerminalTurnEvent(event.Event) || event.EventType == contract.EventTurnInterrupted) {
+			delete(activeSyntheticTurns, syntheticScope)
+		}
 	}
+
 	out := make([]contract.ThreadTurn, 0, len(order))
 	for _, turnID := range order {
-		out = append(out, *turns[turnID])
+		t := turns[turnID]
+
+		if !hasRoleMessage(t.Messages, contract.MessageRoleUser) && t.Summary != "" {
+			prompt := strings.TrimPrefix(t.Summary, "Started turn: ")
+			prependMessage(t, contract.Message{
+				Role: contract.MessageRoleUser,
+				Parts: []contract.ContentPart{
+					{Type: contract.ContentPartTypeText, Text: prompt},
+				},
+			})
+		}
+
+		if !hasRoleMessage(t.Messages, contract.MessageRoleAssistant) {
+			if t.ReasoningText != "" {
+				appendAssistantPart(t, contract.ContentPartTypeReasoning, t.ReasoningText)
+			}
+			if t.AssistantText != "" {
+				appendAssistantPart(t, contract.ContentPartTypeText, t.AssistantText)
+			}
+		}
+
+		out = append(out, *t)
 	}
 	return out
+}
+
+func resolveThreadTurnID(event contract.ThreadEvent, active map[string]string, seq *int) (string, string) {
+	if turnID := strings.TrimSpace(event.TurnID); turnID != "" {
+		return turnID, ""
+	}
+	scope := firstThreadString(event.ThreadID, event.Event.SessionID, event.Event.ProviderSessionID)
+	if scope == "" {
+		return "", ""
+	}
+	if event.EventType == contract.EventTurnStarted || active[scope] == "" {
+		*seq = *seq + 1
+		active[scope] = fmt.Sprintf("%s:synthetic-turn-%d", scope, *seq)
+	}
+	return active[scope], scope
+}
+
+func threadDeltaText(event contract.RuntimeEvent) string {
+	switch event.EventType {
+	case contract.EventAssistantMessageDelta:
+		return contract.EventDeltaText(event)
+	case contract.EventAssistantThoughtDelta:
+		return contract.PayloadString(event.Payload, "delta")
+	default:
+		return ""
+	}
+}
+
+func userMessageFromTurnStarted(event contract.ThreadEvent) (contract.Message, bool) {
+	parts := make([]contract.ContentPart, 0)
+	if text := contract.EventPayloadString(event.Event, contract.PayloadInputText); text != "" {
+		parts = append(parts, contract.ContentPart{Type: contract.ContentPartTypeText, Text: text})
+	}
+	parts = append(parts, contentPartsFromPayload(event.Event.Payload[contract.PayloadInputParts])...)
+	if len(parts) == 0 {
+		prompt := strings.TrimSpace(strings.TrimPrefix(event.Summary, "Started turn: "))
+		if prompt == "" {
+			return contract.Message{}, false
+		}
+		parts = append(parts, contract.ContentPart{Type: contract.ContentPartTypeText, Text: prompt})
+	}
+	return contract.Message{Role: contract.MessageRoleUser, Parts: parts}, true
+}
+
+func contentPartsFromPayload(raw any) []contract.ContentPart {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case []contract.ContentPart:
+		return append([]contract.ContentPart(nil), value...)
+	case []any:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		var parts []contract.ContentPart
+		if err := json.Unmarshal(encoded, &parts); err != nil {
+			return nil
+		}
+		return parts
+	default:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil
+		}
+		var parts []contract.ContentPart
+		if err := json.Unmarshal(encoded, &parts); err != nil {
+			return nil
+		}
+		return parts
+	}
+}
+
+func appendAssistantPart(turn *contract.ThreadTurn, partType string, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if len(turn.Messages) == 0 || turn.Messages[len(turn.Messages)-1].Role != contract.MessageRoleAssistant {
+		turn.Messages = append(turn.Messages, contract.Message{Role: contract.MessageRoleAssistant})
+	}
+	msg := &turn.Messages[len(turn.Messages)-1]
+	if len(msg.Parts) > 0 && msg.Parts[len(msg.Parts)-1].Type == partType {
+		if msg.Parts[len(msg.Parts)-1].Text == "" {
+			msg.Parts[len(msg.Parts)-1].Text = text
+		} else {
+			msg.Parts[len(msg.Parts)-1].Text += text
+		}
+		return
+	}
+	msg.Parts = append(msg.Parts, contract.ContentPart{Type: partType, Text: text})
+}
+
+func appendAssistantToolCalls(turn *contract.ThreadTurn, tools []contract.ToolCall) {
+	if len(tools) == 0 {
+		return
+	}
+	idx := lastRoleMessageIndex(turn.Messages, contract.MessageRoleAssistant)
+	if idx < 0 {
+		turn.Messages = append(turn.Messages, contract.Message{Role: contract.MessageRoleAssistant})
+		idx = len(turn.Messages) - 1
+	}
+	turn.Messages[idx].ToolCalls = append(turn.Messages[idx].ToolCalls, tools...)
+}
+
+func toolMessageFromThreadEvent(event contract.ThreadEvent) (contract.Message, bool) {
+	switch event.EventType {
+	case contract.EventToolCompleted, contract.EventToolErrored:
+	default:
+		return contract.Message{}, false
+	}
+	text := firstThreadString(
+		contract.EventPayloadString(event.Event, "result"),
+		contract.EventPayloadString(event.Event, "output"),
+		contract.EventPayloadString(event.Event, "stdout"),
+		contract.EventPayloadString(event.Event, "stderr"),
+		contract.EventPayloadString(event.Event, "error"),
+		event.Summary,
+	)
+	if text == "" {
+		return contract.Message{}, false
+	}
+	return contract.Message{
+		Role:       contract.MessageRoleTool,
+		ToolCallID: firstThreadString(event.RequestID, event.Event.RequestID, contract.EventPayloadString(event.Event, "tool_call_id"), contract.EventPayloadString(event.Event, "id")),
+		Name:       firstThreadString(contract.EventPayloadString(event.Event, "name"), contract.EventPayloadString(event.Event, "tool_name")),
+		Parts:      []contract.ContentPart{{Type: contract.ContentPartTypeText, Text: text}},
+	}, true
+}
+
+func threadToolCallsFromPayload(raw any) []contract.ToolCall {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case []contract.ToolCall:
+		return append([]contract.ToolCall(nil), value...)
+	case []toolrepair.ToolCall:
+		tools := make([]contract.ToolCall, 0, len(value))
+		for _, item := range value {
+			tools = append(tools, contract.ToolCall{
+				ID:   item.ID,
+				Type: "function",
+				Function: contract.FunctionCall{
+					Name:      item.Name,
+					Arguments: item.Arguments,
+				},
+			})
+		}
+		return tools
+	case []any:
+		tools := make([]contract.ToolCall, 0, len(value))
+		for _, item := range value {
+			if tool, ok := threadToolCallFromAny(item); ok {
+				tools = append(tools, tool)
+			}
+		}
+		return tools
+	default:
+		var tools []contract.ToolCall
+		encoded, err := json.Marshal(value)
+		if err == nil && json.Unmarshal(encoded, &tools) == nil {
+			return tools
+		}
+		if tool, ok := threadToolCallFromAny(value); ok {
+			return []contract.ToolCall{tool}
+		}
+		return nil
+	}
+}
+
+func threadToolCallFromAny(raw any) (contract.ToolCall, bool) {
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return contract.ToolCall{}, false
+	}
+	var tool contract.ToolCall
+	if err := json.Unmarshal(encoded, &tool); err == nil && tool.Function.Name != "" {
+		if tool.Type == "" {
+			tool.Type = "function"
+		}
+		return tool, true
+	}
+	var legacy struct {
+		ID        string         `json:"ID"`
+		Name      string         `json:"Name"`
+		Arguments map[string]any `json:"Arguments"`
+	}
+	if err := json.Unmarshal(encoded, &legacy); err == nil && legacy.Name != "" {
+		return contract.ToolCall{
+			ID:   legacy.ID,
+			Type: "function",
+			Function: contract.FunctionCall{
+				Name:      legacy.Name,
+				Arguments: legacy.Arguments,
+			},
+		}, true
+	}
+	return contract.ToolCall{}, false
+}
+
+func hasRoleMessage(messages []contract.Message, role contract.MessageRole) bool {
+	return lastRoleMessageIndex(messages, role) >= 0
+}
+
+func lastRoleMessageIndex(messages []contract.Message, role contract.MessageRole) int {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == role {
+			return i
+		}
+	}
+	return -1
+}
+
+func hasAssistantParts(turn *contract.ThreadTurn) bool {
+	for _, message := range turn.Messages {
+		if message.Role == contract.MessageRoleAssistant && len(message.Parts) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func prependMessage(turn *contract.ThreadTurn, message contract.Message) {
+	turn.Messages = append([]contract.Message{message}, turn.Messages...)
 }
 
 func containsThreadString(values []string, want string) bool {

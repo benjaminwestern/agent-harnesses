@@ -184,7 +184,7 @@ func newThreadsCmd() *cobra.Command {
 	archiveCmd := func(name string, archived bool) *cobra.Command {
 		c := &cobra.Command{
 			Use:   name + " <thread-id>",
-			Short: strings.Title(name) + " a thread.",
+			Short: titleASCII(name) + " a thread.",
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				socketPath, _ := cmd.Flags().GetString("socket-path")
@@ -202,6 +202,13 @@ func newThreadsCmd() *cobra.Command {
 	cmd.AddCommand(archiveCmd("unarchive", false))
 
 	return cmd
+}
+
+func titleASCII(value string) string {
+	if value == "" {
+		return ""
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
 }
 
 func parseMetadataJSON(value string) (contract.ThreadMetadata, error) {

@@ -13,28 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type repeatedTargets []string
-
-func (r *repeatedTargets) String() string { return strings.Join(*r, ",") }
-
-func (r *repeatedTargets) Set(value string) error {
-	*r = append(*r, value)
-	return nil
-}
-
-type repeatedSelections []contract.ModelSelection
-
-func (r *repeatedSelections) String() string { return "" }
-
-func (r *repeatedSelections) Set(value string) error {
-	selection, err := parseSelectionJSON(value)
-	if err != nil {
-		return err
-	}
-	*r = append(*r, selection)
-	return nil
-}
-
 func newOrchestrateCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "orchestrate", Short: "Run generic orchestration flows."}
 	cmd.AddCommand(newReductionCmd("fanout", "Run the same prompt across one or more targets.", "", true))

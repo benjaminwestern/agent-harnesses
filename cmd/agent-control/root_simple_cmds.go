@@ -10,14 +10,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/benjaminwestern/agentic-control/internal/config"
 	internal "github.com/benjaminwestern/agentic-control/internal/controlplane"
-	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/claude"
-	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/codex"
-	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/gemini"
-	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/opencode"
-	"github.com/benjaminwestern/agentic-control/internal/controlplane/providers/pi"
 	"github.com/benjaminwestern/agentic-control/internal/court"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
+	"github.com/benjaminwestern/agentic-control/pkg/providers/claude"
+	"github.com/benjaminwestern/agentic-control/pkg/providers/codex"
+	"github.com/benjaminwestern/agentic-control/pkg/providers/gemini"
+	"github.com/benjaminwestern/agentic-control/pkg/providers/openaicompatible"
+	"github.com/benjaminwestern/agentic-control/pkg/providers/opencode"
+	"github.com/benjaminwestern/agentic-control/pkg/providers/pi"
 	"github.com/spf13/cobra"
 )
 
@@ -31,12 +33,14 @@ func newServeCmd() *cobra.Command {
 			defer stop()
 			var service *internal.Service
 			emit := func(event contract.RuntimeEvent) { service.PublishEvent(event) }
+			cfg := config.Load()
 			service = internal.NewService(
-				codex.NewProvider(emit),
-				claude.NewProvider(emit),
-				gemini.NewProvider(emit),
-				opencode.NewProvider(emit),
-				pi.NewProvider(emit),
+				codex.NewProvider(emit, cfg.Runtimes["codex"]),
+				claude.NewProvider(emit, cfg.Runtimes["claude"]),
+				gemini.NewProvider(emit, cfg.Runtimes["gemini"]),
+				opencode.NewProvider(emit, cfg.Runtimes["opencode"]),
+				pi.NewProvider(emit, cfg.Runtimes["pi"]),
+				openaicompatible.NewProvider(emit, cfg.Runtimes["openai-compatible"]),
 			)
 			defer func() { _ = service.Close() }()
 			server := internal.NewRPCServer(service)

@@ -64,8 +64,8 @@ agent_control models --socket-path /tmp/agentic-control.sock --runtime opencode 
 
 ## Session Surface
 
-To mirror the thread/session shape seen in richer client apps, Agentic Control
-exposes first-class tracked session commands:
+Agentic Control exposes first-class tracked session commands for host
+applications that need durable thread and session continuity:
 
 - `agent_control sessions list`
 - `agent_control sessions get`

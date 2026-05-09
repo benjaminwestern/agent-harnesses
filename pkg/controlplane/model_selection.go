@@ -37,11 +37,19 @@ func NormalizeModelSelection(registry contract.ModelRegistry, selection contract
 		selection.Claude = nil
 		selection.Gemini = nil
 		selection.Pi = nil
+		selection.OpenAICompat = nil
 	case contract.ProviderKindPi:
 		selection.Codex = nil
 		selection.Claude = nil
 		selection.Gemini = nil
 		selection.OpenCode = nil
+		selection.OpenAICompat = nil
+	case contract.ProviderKindOpenAICompat:
+		selection.Codex = nil
+		selection.Claude = nil
+		selection.Gemini = nil
+		selection.OpenCode = nil
+		selection.Pi = nil
 	}
 	if backend, ok := registryBackend(registry, string(selection.Provider)); ok {
 		if model, ok := registryModel(backend, selection.Model); ok {
@@ -70,6 +78,11 @@ func RuntimeTargetFromSelection(selection contract.ModelSelection) RuntimeTarget
 	case contract.ProviderKindOpenCode:
 		// OpenCode-specific options are retained in the typed selection for future provider-specific surfaces.
 	case contract.ProviderKindPi:
+	case contract.ProviderKindOpenAICompat:
+		if selection.OpenAICompat != nil {
+			target.Options.BaseURL = strings.TrimSpace(selection.OpenAICompat.BaseURL)
+			target.Options.APIKey = strings.TrimSpace(selection.OpenAICompat.APIKey)
+		}
 	}
 	return target
 }

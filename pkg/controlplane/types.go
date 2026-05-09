@@ -8,12 +8,13 @@ import (
 )
 
 type StartSessionRequest struct {
-	SessionID    string
-	CWD          string
-	Model        string
-	ModelOptions ModelOptions
-	Prompt       string
-	Metadata     map[string]any
+	SessionID      string
+	CWD            string
+	Model          string
+	ModelOptions   ModelOptions
+	Prompt         string
+	Metadata       map[string]any
+	ResponseSchema map[string]any
 }
 
 type ResumeSessionRequest struct {
@@ -23,20 +24,56 @@ type ResumeSessionRequest struct {
 	Model             string
 	ModelOptions      ModelOptions
 	Metadata          map[string]any
+	ResponseSchema    map[string]any
 }
 
 // ModelOptions carries provider model controls that need to cross the generic
 // control-plane API. Providers ignore fields they do not understand.
 type ModelOptions struct {
-	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	ThinkingLevel   string `json:"thinking_level,omitempty"`
-	ThinkingBudget  *int   `json:"thinking_budget,omitempty"`
+	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
+	ThinkingLevel     string         `json:"thinking_level,omitempty"`
+	ThinkingBudget    *int           `json:"thinking_budget,omitempty"`
+	BaseURL           string         `json:"base_url,omitempty"`
+	APIKey            string         `json:"api_key,omitempty"`
+	OAuthTokenURL     string         `json:"oauth_token_url,omitempty"`
+	OAuthClientID     string         `json:"oauth_client_id,omitempty"`
+	OAuthClientSecret string         `json:"oauth_client_secret,omitempty"`
+	ResponseSchema    map[string]any `json:"response_schema,omitempty"`
+	Logprobs          bool           `json:"logprobs,omitempty"`
+	TopLogprobs       int            `json:"top_logprobs,omitempty"`
 }
 
 type SendInputRequest struct {
 	SessionID string
 	Text      string
+	Parts     []contract.ContentPart
 	Metadata  map[string]any
+}
+
+func (request *StartSessionRequest) Normalize() {
+	if request == nil {
+		return
+	}
+	if request.ResponseSchema != nil {
+		request.ModelOptions.ResponseSchema = request.ResponseSchema
+		return
+	}
+	if request.ModelOptions.ResponseSchema != nil {
+		request.ResponseSchema = request.ModelOptions.ResponseSchema
+	}
+}
+
+func (request *ResumeSessionRequest) Normalize() {
+	if request == nil {
+		return
+	}
+	if request.ResponseSchema != nil {
+		request.ModelOptions.ResponseSchema = request.ResponseSchema
+		return
+	}
+	if request.ModelOptions.ResponseSchema != nil {
+		request.ResponseSchema = request.ModelOptions.ResponseSchema
+	}
 }
 
 type RespondRequest struct {

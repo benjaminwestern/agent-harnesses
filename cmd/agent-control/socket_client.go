@@ -196,13 +196,14 @@ func (c *socketRPCClient) ReadThread(ctx context.Context, threadID string) (*con
 func (c *socketRPCClient) StartSession(ctx context.Context, runtime string, request api.StartSessionRequest) (*contract.RuntimeSession, error) {
 	var result contract.RuntimeSession
 	err := c.call(ctx, "session.start", map[string]any{
-		"runtime":       runtime,
-		"session_id":    request.SessionID,
-		"cwd":           request.CWD,
-		"model":         request.Model,
-		"model_options": request.ModelOptions,
-		"prompt":        request.Prompt,
-		"metadata":      request.Metadata,
+		"runtime":         runtime,
+		"session_id":      request.SessionID,
+		"cwd":             request.CWD,
+		"model":           request.Model,
+		"model_options":   request.ModelOptions,
+		"prompt":          request.Prompt,
+		"metadata":        request.Metadata,
+		"response_schema": request.ResponseSchema,
 	}, &result)
 	if err != nil {
 		return nil, err
@@ -220,6 +221,7 @@ func (c *socketRPCClient) ResumeSession(ctx context.Context, runtime string, req
 		"model":               request.Model,
 		"model_options":       request.ModelOptions,
 		"metadata":            request.Metadata,
+		"response_schema":     request.ResponseSchema,
 	}, &result)
 	if err != nil {
 		return nil, err
@@ -232,6 +234,7 @@ func (c *socketRPCClient) SendInput(ctx context.Context, request api.SendInputRe
 	err := c.call(ctx, "session.send", map[string]any{
 		"session_id": request.SessionID,
 		"text":       request.Text,
+		"parts":      request.Parts,
 		"metadata":   request.Metadata,
 	}, &result)
 	if err != nil {
@@ -349,4 +352,209 @@ func (c *socketRPCClient) SubscribeEvents(buffer int) (<-chan contract.RuntimeEv
 		stop()
 	}()
 	return ch, stop
+}
+
+// Memory
+func (c *socketRPCClient) SetMemory(ctx context.Context, entry contract.MemoryEntry) error {
+	var result map[string]any
+	return c.call(ctx, "memory.set", entry, &result)
+}
+func (c *socketRPCClient) GetMemory(ctx context.Context, workspaceID, key string) (contract.MemoryEntry, error) {
+	var result contract.MemoryEntry
+	err := c.call(ctx, "memory.get", map[string]any{"workspace_id": workspaceID, "key": key}, &result)
+	return result, err
+}
+func (c *socketRPCClient) DeleteMemory(ctx context.Context, workspaceID, key string) error {
+	var result map[string]any
+	return c.call(ctx, "memory.delete", map[string]any{"workspace_id": workspaceID, "key": key}, &result)
+}
+func (c *socketRPCClient) ListMemory(ctx context.Context, workspaceID string) ([]contract.MemoryEntry, error) {
+	var result []contract.MemoryEntry
+	err := c.call(ctx, "memory.list", map[string]any{"workspace_id": workspaceID}, &result)
+	return result, err
+}
+
+// Documents
+func (c *socketRPCClient) WriteDocument(ctx context.Context, doc contract.Document) (contract.Document, error) {
+	var result contract.Document
+	err := c.call(ctx, "documents.write", doc, &result)
+	return result, err
+}
+func (c *socketRPCClient) GetDocument(ctx context.Context, workspaceID, id string) (contract.Document, error) {
+	var result contract.Document
+	err := c.call(ctx, "documents.get", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+	return result, err
+}
+func (c *socketRPCClient) ListDocuments(ctx context.Context, workspaceID string) ([]contract.Document, error) {
+	var result []contract.Document
+	err := c.call(ctx, "documents.list", map[string]any{"workspace_id": workspaceID}, &result)
+	return result, err
+}
+func (c *socketRPCClient) DeleteDocument(ctx context.Context, workspaceID, id string) error {
+	var result map[string]any
+	return c.call(ctx, "documents.delete", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+}
+func (c *socketRPCClient) AppendDocument(ctx context.Context, workspaceID, id, content string) error {
+	var result map[string]any
+	return c.call(ctx, "documents.append", map[string]any{"workspace_id": workspaceID, "key": id, "content": content}, &result)
+}
+func (c *socketRPCClient) AddDocumentMetadata(ctx context.Context, workspaceID, id string, metadata map[string]any) error {
+	var result map[string]any
+	return c.call(ctx, "documents.add_metadata", map[string]any{"workspace_id": workspaceID, "key": id, "metadata": metadata}, &result)
+}
+func (c *socketRPCClient) RenameDocument(ctx context.Context, workspaceID, id, name string) error {
+	var result map[string]any
+	return c.call(ctx, "documents.rename", map[string]any{"workspace_id": workspaceID, "key": id, "name": name}, &result)
+}
+func (c *socketRPCClient) ArchiveDocument(ctx context.Context, workspaceID, id string, archived bool) error {
+	var result map[string]any
+	return c.call(ctx, "documents.archive", map[string]any{"workspace_id": workspaceID, "key": id, "archived": archived}, &result)
+}
+func (c *socketRPCClient) ClearDocument(ctx context.Context, workspaceID, id string) error {
+	var result map[string]any
+	return c.call(ctx, "documents.clear", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+}
+
+// Tasks
+func (c *socketRPCClient) CreateTask(ctx context.Context, task contract.Task) (contract.Task, error) {
+	var result contract.Task
+	err := c.call(ctx, "tasks.create", task, &result)
+	return result, err
+}
+func (c *socketRPCClient) UpdateTask(ctx context.Context, task contract.Task) (contract.Task, error) {
+	var result contract.Task
+	err := c.call(ctx, "tasks.update", task, &result)
+	return result, err
+}
+func (c *socketRPCClient) GetTask(ctx context.Context, workspaceID, id string) (contract.Task, error) {
+	var result contract.Task
+	err := c.call(ctx, "tasks.get", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+	return result, err
+}
+func (c *socketRPCClient) ListTasks(ctx context.Context, workspaceID string) ([]contract.Task, error) {
+	var result []contract.Task
+	err := c.call(ctx, "tasks.list", map[string]any{"workspace_id": workspaceID}, &result)
+	return result, err
+}
+func (c *socketRPCClient) DeleteTask(ctx context.Context, workspaceID, id string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.delete", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+}
+func (c *socketRPCClient) AddTaskMetadata(ctx context.Context, workspaceID, id string, metadata map[string]any) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.add_metadata", map[string]any{"workspace_id": workspaceID, "key": id, "metadata": metadata}, &result)
+}
+func (c *socketRPCClient) AddTaskTag(ctx context.Context, workspaceID, id, tag string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.add_tag", map[string]any{"workspace_id": workspaceID, "key": id, "tag": tag}, &result)
+}
+func (c *socketRPCClient) RemoveTaskTag(ctx context.Context, workspaceID, id, tag string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.remove_tag", map[string]any{"workspace_id": workspaceID, "key": id, "tag": tag}, &result)
+}
+func (c *socketRPCClient) SetTaskBlockers(ctx context.Context, workspaceID, id string, blockerIDs []string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.set_blockers", map[string]any{"workspace_id": workspaceID, "key": id, "blocker_ids": blockerIDs}, &result)
+}
+func (c *socketRPCClient) AddTaskBlocker(ctx context.Context, workspaceID, id, blockerID string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.add_blocker", map[string]any{"workspace_id": workspaceID, "key": id, "blocker_id": blockerID}, &result)
+}
+func (c *socketRPCClient) RemoveTaskBlocker(ctx context.Context, workspaceID, id, blockerID string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.remove_blocker", map[string]any{"workspace_id": workspaceID, "key": id, "blocker_id": blockerID}, &result)
+}
+func (c *socketRPCClient) LockTask(ctx context.Context, workspaceID, id, actorID string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.lock", map[string]any{"workspace_id": workspaceID, "key": id, "actor_id": actorID}, &result)
+}
+func (c *socketRPCClient) UnlockTask(ctx context.Context, workspaceID, id, actorID string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.unlock", map[string]any{"workspace_id": workspaceID, "key": id, "actor_id": actorID}, &result)
+}
+func (c *socketRPCClient) CreateTaskComment(ctx context.Context, comment contract.TaskComment) (contract.TaskComment, error) {
+	var result contract.TaskComment
+	err := c.call(ctx, "tasks.comments.create", comment, &result)
+	return result, err
+}
+func (c *socketRPCClient) UpdateTaskComment(ctx context.Context, id, body string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.comments.update", map[string]any{"id": id, "body": body}, &result)
+}
+func (c *socketRPCClient) DeleteTaskComment(ctx context.Context, id string) error {
+	var result map[string]any
+	return c.call(ctx, "tasks.comments.delete", map[string]any{"id": id}, &result)
+}
+func (c *socketRPCClient) ListTaskComments(ctx context.Context, taskID string) ([]contract.TaskComment, error) {
+	var result []contract.TaskComment
+	err := c.call(ctx, "tasks.comments.list", map[string]any{"task_id": taskID}, &result)
+	return result, err
+}
+
+// Wakeups
+func (c *socketRPCClient) SetWakeup(ctx context.Context, wakeup contract.Wakeup) error {
+	var result map[string]any
+	return c.call(ctx, "wakeups.set", wakeup, &result)
+}
+func (c *socketRPCClient) ListPendingWakeups(ctx context.Context, workspaceID string) ([]contract.Wakeup, error) {
+	var result []contract.Wakeup
+	err := c.call(ctx, "wakeups.list_pending", map[string]any{"workspace_id": workspaceID}, &result)
+	return result, err
+}
+func (c *socketRPCClient) GetWakeup(ctx context.Context, workspaceID, id string) (contract.Wakeup, error) {
+	var result contract.Wakeup
+	err := c.call(ctx, "wakeups.get", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+	return result, err
+}
+func (c *socketRPCClient) CancelWakeup(ctx context.Context, workspaceID, id string) error {
+	var result map[string]any
+	return c.call(ctx, "wakeups.cancel", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+}
+func (c *socketRPCClient) PauseWakeup(ctx context.Context, workspaceID, id string) error {
+	var result map[string]any
+	return c.call(ctx, "wakeups.pause", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+}
+func (c *socketRPCClient) ResumeWakeup(ctx context.Context, workspaceID, id string) error {
+	var result map[string]any
+	return c.call(ctx, "wakeups.resume", map[string]any{"workspace_id": workspaceID, "key": id}, &result)
+}
+func (c *socketRPCClient) ResetWakeup(ctx context.Context, workspaceID, id string, dueAtMS int64) error {
+	var result map[string]any
+	return c.call(ctx, "wakeups.reset", map[string]any{"workspace_id": workspaceID, "key": id, "due_at_ms": dueAtMS}, &result)
+}
+
+// Leases
+func (c *socketRPCClient) AcquireLease(ctx context.Context, lease contract.Lease) (bool, error) {
+	var result map[string]any
+	err := c.call(ctx, "leases.acquire", lease, &result)
+	if err != nil {
+		return false, err
+	}
+	return result["acquired"].(bool), nil
+}
+func (c *socketRPCClient) ReleaseLease(ctx context.Context, workspaceID, lockKey, ownerID string) error {
+	var result map[string]any
+	return c.call(ctx, "leases.release", map[string]any{"workspace_id": workspaceID, "lock_key": lockKey, "owner_id": ownerID}, &result)
+}
+func (c *socketRPCClient) GetLease(ctx context.Context, workspaceID, lockKey string) (*contract.Lease, error) {
+	var result contract.Lease
+	err := c.call(ctx, "leases.get", map[string]any{"workspace_id": workspaceID, "key": lockKey}, &result)
+	if err != nil {
+		if stringsContains(err.Error(), "sql: no rows") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if result.WorkspaceID == "" {
+		return nil, nil
+	}
+	return &result, nil
+}
+func (c *socketRPCClient) ResetLease(ctx context.Context, workspaceID, lockKey string) error {
+	var result map[string]any
+	return c.call(ctx, "leases.reset", map[string]any{"workspace_id": workspaceID, "key": lockKey}, &result)
+}
+
+func stringsContains(s, substr string) bool {
+	return len(s) >= len(substr) && s[0:len(substr)] == substr
 }

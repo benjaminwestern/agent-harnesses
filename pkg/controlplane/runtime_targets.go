@@ -201,37 +201,6 @@ func validateRuntimeModelOptions(target RuntimeTarget, model contract.RuntimeMod
 	return issues
 }
 
-func runtimeDescriptorByName(descriptors []contract.RuntimeDescriptor, backend string) (*contract.RuntimeDescriptor, bool) {
-	for _, runtime := range descriptors {
-		if runtime.Runtime != backend {
-			continue
-		}
-		runtimeCopy := runtime
-		return &runtimeCopy, true
-	}
-	return nil, false
-}
-
-func runtimeModelByID(models []contract.RuntimeModel, id string) (*contract.RuntimeModel, bool) {
-	for _, model := range models {
-		if model.ID != id {
-			continue
-		}
-		modelCopy := model
-		return &modelCopy, true
-	}
-	return nil, false
-}
-
-func runtimeAllowsCustomModels(models []contract.RuntimeModel) bool {
-	for _, model := range models {
-		if model.Custom {
-			return true
-		}
-	}
-	return false
-}
-
 func runtimeModelOptionExists(options []contract.RuntimeModelOption, value string) bool {
 	for _, option := range options {
 		if option.Value == value {

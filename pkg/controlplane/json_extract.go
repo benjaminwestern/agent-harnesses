@@ -5,10 +5,12 @@ import (
 	"strings"
 )
 
-type StructuredJSONParser func(candidate string) (rendered string, normalisedJSON string, ok bool)
+type StructuredJSONParser func(candidate string) (rendered string, normalisedJSON string, err error)
 
-func ExtractStructuredJSON(output string, parser StructuredJSONParser) (string, string) {
+func ExtractStructuredJSON(output string, parser StructuredJSONParser) (string, string, error) {
 	var fallback string
+	var lastErr error
+
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -18,12 +20,14 @@ func ExtractStructuredJSON(output string, parser StructuredJSONParser) (string, 
 			fallback = line
 		}
 		for _, candidate := range JSONObjectCandidates(line) {
-			rendered, normalised, ok := parser(candidate)
-			if ok {
-				fallback = rendered
+			rendered, normalised, err := parser(candidate)
+			if err == nil {
 				if normalised != "" {
-					return rendered, normalised
+					return rendered, normalised, nil
 				}
+				fallback = rendered
+			} else {
+				lastErr = err
 			}
 		}
 	}
@@ -38,20 +42,25 @@ func ExtractStructuredJSON(output string, parser StructuredJSONParser) (string, 
 			fallback = suffix
 		}
 		for _, candidate := range JSONObjectCandidates(suffix) {
-			rendered, normalised, ok := parser(candidate)
-			if ok {
-				return rendered, normalised
+			rendered, normalised, err := parser(candidate)
+			if err == nil {
+				return rendered, normalised, nil
+			} else {
+				lastErr = err
 			}
 		}
 	}
 
 	for _, candidate := range JSONObjectCandidates(output) {
-		rendered, normalised, ok := parser(candidate)
-		if ok {
-			return rendered, normalised
+		rendered, normalised, err := parser(candidate)
+		if err == nil {
+			return rendered, normalised, nil
+		} else {
+			lastErr = err
 		}
 	}
-	return strings.TrimSpace(firstNonEmptyValue(fallback, output)), ""
+
+	return strings.TrimSpace(firstNonEmptyValue(fallback, output)), "", lastErr
 }
 
 func JSONObjectCandidates(output string) []string {

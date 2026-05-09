@@ -193,3 +193,54 @@ type ArtifactRecord struct {
 	Content   string    `json:"content"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type PromptRecord struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	Version   int       `json:"version"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type DatasetRecord struct {
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	SchemaDefinition string    `json:"schema_definition"`
+	SourceType       string    `json:"source_type"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type DatasetItemRecord struct {
+	ID           string    `json:"id"`
+	DatasetID    string    `json:"dataset_id"`
+	InputPayload string    `json:"input_payload"`
+	TargetOutput string    `json:"target_output"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type EvaluationRecord struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	DatasetID   string    `json:"dataset_id"`
+	PromptID    string    `json:"prompt_id"`
+	TargetModel string    `json:"target_model"`
+	JudgeModel  string    `json:"judge_model"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type EvaluationResultRecord struct {
+	ID            string    `json:"id"`
+	EvaluationID  string    `json:"evaluation_id"`
+	DatasetItemID string    `json:"dataset_item_id"`
+	Score         float64   `json:"score"`
+	Rationale     string    `json:"rationale"`
+	Passed        bool      `json:"passed"`
+	LatencyMS     int       `json:"latency_ms"`
+	CostUSD       float64   `json:"cost_usd"`
+	CreatedAt     time.Time `json:"created_at"`
+}

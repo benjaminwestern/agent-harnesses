@@ -9,11 +9,11 @@ resume saved sessions by session file path.
 
 Official references:
 
-- [pi README](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-- [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md)
-- [pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
-- [pi session format](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/session.md)
-- [pi models](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/models.md)
+- [pi README](https://github.com/earendil-works/pi/tree/main/packages/coding-agent)
+- [pi RPC mode](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md)
+- [pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
+- [pi session format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/session.md)
+- [pi models](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)
 
 This bundle was smoke-tested locally on April 24, 2026 against
 `@mariozechner/pi-coding-agent 0.68.0`. The upstream package version checked
@@ -84,6 +84,7 @@ The pi controller supports:
 - send
 - interrupt
 - list active controller-owned sessions
+- advanced reasoning via `ModelOptions.ThinkingLevel` mapped to `--thinking`
 - stop
 
 The provider does not expose host-owned approval or user-input

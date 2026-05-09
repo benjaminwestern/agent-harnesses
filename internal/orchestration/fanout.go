@@ -38,6 +38,7 @@ type FanoutTargetResult struct {
 	EventCount      int                      `json:"event_count,omitempty"`
 	RecordedUsage   contract.TokenUsage      `json:"recorded_usage,omitempty"`
 	RecordedCostUSD float64                  `json:"recorded_cost_usd,omitempty"`
+	Logprobs        []contract.TokenLogprob  `json:"logprobs,omitempty"`
 }
 
 type FanoutResult struct {
@@ -173,6 +174,9 @@ func RunFanout(ctx context.Context, controller FanoutController, options FanoutO
 			case contract.IsTurnCompletedEvent(event):
 				state.done = true
 				state.result.Text = firstNonEmptyFanout(state.accumulator.FinalText, state.accumulator.JoinedDelta(), event.Summary)
+				if logprobs, ok := contract.EventLogprobs(event); ok {
+					state.result.Logprobs = logprobs
+				}
 				state.result.EventCount = len(state.accumulator.EventLines)
 				finishFanoutTarget(ctx, controller, options.KeepSessions, state)
 				results = append(results, state.result)

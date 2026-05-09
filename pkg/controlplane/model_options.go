@@ -8,7 +8,15 @@ import (
 func HasModelOptions(options ModelOptions) bool {
 	return strings.TrimSpace(options.ReasoningEffort) != "" ||
 		strings.TrimSpace(options.ThinkingLevel) != "" ||
-		options.ThinkingBudget != nil
+		options.ThinkingBudget != nil ||
+		strings.TrimSpace(options.BaseURL) != "" ||
+		strings.TrimSpace(options.APIKey) != "" ||
+		strings.TrimSpace(options.OAuthTokenURL) != "" ||
+		strings.TrimSpace(options.OAuthClientID) != "" ||
+		strings.TrimSpace(options.OAuthClientSecret) != "" ||
+		options.ResponseSchema != nil ||
+		options.Logprobs ||
+		options.TopLogprobs > 0
 }
 
 func MergeModelOptions(values ...ModelOptions) ModelOptions {
@@ -23,6 +31,30 @@ func MergeModelOptions(values ...ModelOptions) ModelOptions {
 		}
 		if value.ThinkingBudget != nil {
 			out.ThinkingBudget = value.ThinkingBudget
+		}
+		if strings.TrimSpace(value.BaseURL) != "" {
+			out.BaseURL = strings.TrimSpace(value.BaseURL)
+		}
+		if strings.TrimSpace(value.APIKey) != "" {
+			out.APIKey = strings.TrimSpace(value.APIKey)
+		}
+		if strings.TrimSpace(value.OAuthTokenURL) != "" {
+			out.OAuthTokenURL = strings.TrimSpace(value.OAuthTokenURL)
+		}
+		if strings.TrimSpace(value.OAuthClientID) != "" {
+			out.OAuthClientID = strings.TrimSpace(value.OAuthClientID)
+		}
+		if strings.TrimSpace(value.OAuthClientSecret) != "" {
+			out.OAuthClientSecret = strings.TrimSpace(value.OAuthClientSecret)
+		}
+		if value.ResponseSchema != nil {
+			out.ResponseSchema = value.ResponseSchema
+		}
+		if value.Logprobs {
+			out.Logprobs = true
+		}
+		if value.TopLogprobs > 0 {
+			out.TopLogprobs = value.TopLogprobs
 		}
 	}
 	return out

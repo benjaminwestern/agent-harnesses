@@ -2,16 +2,19 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
+	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 var ErrMissingStructuredResult = errors.New("structured result not found")
 
-type StructuredResultExtractor func(values ...string) (rendered string, normalisedJSON string)
+type StructuredResultExtractor func(values ...string) (rendered string, normalisedJSON string, err error)
 
 type StructuredSessionController interface {
 	SubscribeEvents(buffer int) (<-chan contract.RuntimeEvent, func())
@@ -42,6 +45,7 @@ type StructuredSessionResult struct {
 	JSON          string
 	Repaired      bool
 	RepairAttempt int
+	Logprobs      []contract.TokenLogprob
 }
 
 func RunStructuredSession(
@@ -54,6 +58,7 @@ func RunStructuredSession(
 	if options.Extract == nil {
 		return StructuredSessionResult{}, errors.New("structured result extractor is required")
 	}
+	request.Normalize()
 	buffer := options.EventBuffer
 	if buffer <= 0 {
 		buffer = 512
@@ -73,9 +78,10 @@ func RunStructuredSession(
 	}
 
 	for attempt := 0; ; attempt++ {
-		turn, err := waitForStructuredTurn(ctx, session.SessionID, events, options)
+		turn, err := waitForStructuredTurn(ctx, session.SessionID, events, options, request)
 		result.Text = turn.Text
 		result.JSON = turn.JSON
+		result.Logprobs = turn.Logprobs
 		result.RepairAttempt = attempt
 		if err == nil {
 			result.Repaired = attempt > 0
@@ -87,6 +93,18 @@ func RunStructuredSession(
 		if attempt >= options.MaxRepairTurns || options.RepairPrompt == "" {
 			return result, err
 		}
+
+		repairPrompt := options.RepairPrompt
+		if errText := strings.TrimSpace(err.Error()); errText != "" {
+			repairPrompt = fmt.Sprintf("%s\n\nLast validation error:\n%s", repairPrompt, errText)
+		}
+		if request.ResponseSchema != nil {
+			schemaBytes, err := json.MarshalIndent(request.ResponseSchema, "", "  ")
+			if err == nil {
+				repairPrompt = fmt.Sprintf("%s\n\nTarget Schema:\n```json\n%s\n```", repairPrompt, string(schemaBytes))
+			}
+		}
+
 		if options.OnMissingStructuredResult != nil {
 			if hookErr := options.OnMissingStructuredResult(ctx); hookErr != nil {
 				return result, hookErr
@@ -94,7 +112,7 @@ func RunStructuredSession(
 		}
 		if _, sendErr := controller.SendInput(ctx, SendInputRequest{
 			SessionID: session.SessionID,
-			Text:      options.RepairPrompt,
+			Text:      repairPrompt,
 			Metadata:  options.RepairMetadata,
 		}); sendErr != nil {
 			return result, fmt.Errorf("structured result repair turn: %w", sendErr)
@@ -103,8 +121,9 @@ func RunStructuredSession(
 }
 
 type structuredTurnResult struct {
-	Text string
-	JSON string
+	Text     string
+	JSON     string
+	Logprobs []contract.TokenLogprob
 }
 
 func waitForStructuredTurn(
@@ -112,6 +131,7 @@ func waitForStructuredTurn(
 	sessionID string,
 	events <-chan contract.RuntimeEvent,
 	options StructuredSessionOptions,
+	request StartSessionRequest,
 ) (structuredTurnResult, error) {
 	var turn TurnAccumulator
 	tickEvery := options.TickEvery
@@ -151,13 +171,36 @@ func waitForStructuredTurn(
 						return structuredTurnResult{Text: turn.JoinedDelta()}, err
 					}
 				}
-				rendered, resultJSON := options.Extract(turn.FinalText, turn.LatestDelta, turn.JoinedDelta(), event.Summary)
-				if resultJSON == "" {
+				rendered, resultJSON, extractErr := options.Extract(turn.FinalText, turn.LatestDelta, turn.JoinedDelta(), event.Summary)
+
+				if resultJSON != "" && extractErr == nil && request.ResponseSchema != nil {
+					schemaCompiler := jsonschema.NewCompiler()
+					schemaCompiler.Draft = jsonschema.Draft7
+					schemaBytes, _ := json.Marshal(request.ResponseSchema)
+					if err := schemaCompiler.AddResource("schema.json", strings.NewReader(string(schemaBytes))); err == nil {
+						if schema, err := schemaCompiler.Compile("schema.json"); err == nil {
+							var parsedCandidate any
+							if err := json.Unmarshal([]byte(resultJSON), &parsedCandidate); err == nil {
+								if validationErr := schema.Validate(parsedCandidate); validationErr != nil {
+									extractErr = fmt.Errorf("JSON does not match required schema: %v", validationErr)
+									resultJSON = ""
+								}
+							}
+						}
+					}
+				}
+
+				if resultJSON == "" || extractErr != nil {
+					if extractErr != nil {
+						return structuredTurnResult{
+							Text: "control plane completed without the required structured result or the structured result was invalid. Schema Validation failed.",
+						}, fmt.Errorf("%w: %v", ErrMissingStructuredResult, extractErr)
+					}
 					return structuredTurnResult{
 						Text: "control plane completed without the required structured result. Runtime events are stored as artifacts.",
 					}, ErrMissingStructuredResult
 				}
-				return structuredTurnResult{Text: rendered, JSON: resultJSON}, nil
+				return structuredTurnResult{Text: rendered, JSON: resultJSON, Logprobs: turn.Logprobs}, nil
 			case contract.IsTurnErroredEvent(event):
 				if turn.HasEvents() && options.OnTurnEvents != nil {
 					if err := options.OnTurnEvents(ctx, turn.EventsJSONL()); err != nil {

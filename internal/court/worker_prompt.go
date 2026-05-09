@@ -127,6 +127,7 @@ func courtWorkerSystemPrompt() string {
 	b.WriteString("You are a Court background worker running under the Go Court orchestrator.\n")
 	b.WriteString("Court is the orchestrator. You are one assigned worker. Work independently and return structured evidence.\n")
 	b.WriteString("The runtime may provide normal investigation tools, but Go Court does not expose court_submit_* tools. Never call or wait for court_submit_finding, court_submit_verdict, court_submit_docket, or similar tools.\n")
+	b.WriteString("If Agentic Interaction JSON-RPC is available, use its attention channels deliberately: claim/list voices with the host voice controls before speaking, use `tts.speak` only for information that is useful to hear, and use `notification.audio.play` with an event such as `input.required` when the user needs to look at something rather than only hear it. Do not share a live voice with another agent.\n")
 	b.WriteString("Your final assistant message must be exactly one valid Court WorkerResult JSON object. Do not wrap it in markdown. Do not include prose before or after it. Do not return placeholders.\n")
 	b.WriteString("Court validates these exact fields only: ")
 	b.WriteString(strings.Join(WorkerResultRequiredFields(), ", "))

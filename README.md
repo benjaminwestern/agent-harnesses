@@ -40,6 +40,7 @@ advanced review-oriented subsystem on top.
 | Track downstream session history and token economics | control-plane session ledger | [`internal/controlplane/sessionledger.go`](internal/controlplane/sessionledger.go), [`docs/session-ledger.md`](docs/session-ledger.md) |
 | Own backend/provider/model definitions and validation | shared runtime target helpers | [`pkg/controlplane/runtime_targets.go`](pkg/controlplane/runtime_targets.go), [`docs/model-registry.md`](docs/model-registry.md) |
 | Route model-backed text generation work in upstream services | `pkg/controlplane.TextGenerationRouter` | [`pkg/controlplane/textgen.go`](pkg/controlplane/textgen.go) |
+| Generate synthetic data and run LLM-as-a-judge evaluations | `agent_control dataset` | [`cmd/agent-control/dataset_cmds.go`](cmd/agent-control/dataset_cmds.go), [`internal/orchestration/dataset_eval.go`](internal/orchestration/dataset_eval.go) |
 | Run Court workflow orchestration in process | `internal/court` | [`internal/court/`](internal/court), [`docs/court-subsystem.md`](docs/court-subsystem.md) |
 | Capture unmanaged runtime telemetry | `agent_harness install`, `agent_harness listen`, and runtime bundles | [`cmd/agent-harness/main.go`](cmd/agent-harness/main.go), [`internal/harness/harness.go`](internal/harness/harness.go), [`internal/harness/install.go`](internal/harness/install.go), [`internal/harness/run.go`](internal/harness/run.go) |
 | Consume stable JSON contracts | Go contract types | [`pkg/contract/controlplane.go`](pkg/contract/controlplane.go), [`pkg/contract/harness.go`](pkg/contract/harness.go) |
@@ -83,7 +84,7 @@ Read these next:
 
 ## Quick Start
 
-Build the two binaries:
+Build the two CLI binaries:
 
 ```bash
 mise trust
@@ -121,6 +122,38 @@ agent_control models --socket-path /tmp/agentic-control.sock --runtime opencode 
 agent_control smoke --socket-path /tmp/agentic-control.sock
 agent_control court run --socket-path /tmp/agentic-control.sock --task "review this repo" --provider opencode --model-selection google/gemini-3-flash-preview --workspace . --watch
 ```
+
+Run the local operator UI after the frontend bundle exists:
+
+```bash
+agent_control web --workspace . --backend opencode --open
+```
+
+The same React UI is embedded by the Wails desktop entry point in
+`cmd/agent-control-desktop`. The root package does not launch the desktop app.
+Build it explicitly when needed:
+
+```bash
+mise run desktop:build
+```
+
+It uses the shared app host so browser and desktop flows expose the same CLI
+runtime controls, Court catalog, Court runs, speech routing, and Agentic
+Interaction JSON-RPC calls.
+
+The UI uses convention-first routes. `/agents` is the default path, while
+specific resources are directly addressable as `/agents/{session_id}`,
+`/court/{workflow_id}`, and `/runs/{run_id}`. Operational surfaces are also
+stable paths: `/voices`, `/attention`, `/rpc`, and `/logs`. Workspace and
+backend remain optional query parameters, so the default local path stays small
+and overrides are shareable only when needed.
+
+The UI host also owns agent voice allocation. Agents can claim a voice, and
+operators can pin `project + agent -> voice` rules; the host refuses a second
+live agent that tries to use an already reserved voice. Voice playback still
+flows through Agentic Interaction TTS. Visual attention requests use Agentic
+Interaction notification audio, so agents can distinguish "read this aloud"
+from "get the user's eyes on this."
 
 The same control-plane can be imported directly from Go:
 
@@ -177,7 +210,7 @@ Install references:
 | Gemini | [Gemini CLI installation](https://geminicli.com/docs/get-started/installation/) | [Gemini CLI hooks reference](https://geminicli.com/docs/hooks/reference/) |
 | Claude | [Claude Code setup](https://docs.claude.com/en/docs/claude-code/setup) | [Claude Code hooks reference](https://code.claude.com/docs/en/hooks) |
 | OpenCode | [OpenCode install guide](https://opencode.ai/docs/) | [OpenCode plugins](https://opencode.ai/docs/plugins/), [OpenCode config](https://opencode.ai/docs/config/), [OpenCode permissions](https://opencode.ai/docs/permissions/), [OpenCode server](https://opencode.ai/docs/server/) |
-| pi | [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) | [pi RPC mode](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc.md), [pi extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md) |
+| pi | [pi package install](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) | [pi RPC mode](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md), [pi extensions](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md) |
 
 pi documents a machine-readable RPC model inventory path through
 `get_available_models`. Agentic Control reports pi install and version
@@ -441,7 +474,8 @@ Useful tasks:
 
 | Command | Purpose |
 | --- | --- |
-| `mise run build` | Build `agent_harness` and `agent_control`. |
+| `mise run build` | Build the web UI bundle, `agent_harness`, and `agent_control`. |
+| `mise run desktop:build` | Build the web UI bundle and `agent-control-desktop`. |
 | `mise run control:serve` | Start the control-plane on `/tmp/agentic-control.sock` unless `SOCKET_PATH` is set. |
 | `mise run validate-docs` | Validate README links and required generated assets. |
 | `mise run generate-assets` | Regenerate README SVG assets and the architecture diagram. |

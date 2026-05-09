@@ -38,6 +38,7 @@ Depending on the runtime and the specific event, the payload can also include:
 - `exit_code`
 - `stop_hook_active`
 - `runtime_pid`
+- `logprobs`
 
 `provenance` is usually `native_hook` for hook-based runtimes and
 `native_plugin` for plugin-based runtimes such as OpenCode.

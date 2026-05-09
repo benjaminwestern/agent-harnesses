@@ -88,6 +88,7 @@ The Claude controller supports:
 - interrupt
 - respond to approval requests
 - respond to user-input requests
+- advanced reasoning via `ModelOptions.ReasoningEffort` mapped to `effort`
 - list active controller-owned sessions
 - stop
 
@@ -125,6 +126,7 @@ implements today:
 - interrupt
 - respond to approval requests
 - respond to user-input requests
+- advanced reasoning via `ModelOptions.ReasoningEffort` mapped to `effort`
 - list active controller-owned sessions
 - stop
 

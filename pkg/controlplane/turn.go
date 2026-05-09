@@ -12,6 +12,7 @@ type TurnAccumulator struct {
 	JoinedText  strings.Builder
 	LatestDelta string
 	FinalText   string
+	Logprobs    []contract.TokenLogprob
 }
 
 func (t *TurnAccumulator) Add(event contract.RuntimeEvent) {
@@ -24,6 +25,9 @@ func (t *TurnAccumulator) Add(event contract.RuntimeEvent) {
 	}
 	if finalText := contract.EventFinalText(event); finalText != "" {
 		t.FinalText = finalText
+	}
+	if logprobs, ok := contract.EventLogprobs(event); ok {
+		t.Logprobs = logprobs
 	}
 }
 

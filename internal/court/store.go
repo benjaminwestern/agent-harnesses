@@ -47,16 +47,6 @@ func rowsErr(rows *sql.Rows) error {
 	return wrapErr("iterate sql rows", rows.Err())
 }
 
-func lastInsertID(result sql.Result) (int64, error) {
-	id, err := result.LastInsertId()
-	return id, wrapErr("read last insert id", err)
-}
-
-func rowsAffected(result sql.Result) (int64, error) {
-	count, err := result.RowsAffected()
-	return count, wrapErr("read affected row count", err)
-}
-
 // OpenStore provides Court runtime functionality.
 func OpenStore(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -233,6 +223,55 @@ func (s *Store) init(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_worker_controls_pending ON worker_controls(worker_id, status, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_runtime_requests_run ON runtime_requests(run_id, status, id)`,
 		`CREATE INDEX IF NOT EXISTS idx_runtime_requests_response ON runtime_requests(worker_id, response_status, id)`,
+		`CREATE TABLE IF NOT EXISTS prompts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			content TEXT NOT NULL,
+			version INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS datasets (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			schema_definition TEXT NOT NULL,
+			source_type TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS dataset_items (
+			id TEXT PRIMARY KEY,
+			dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+			input_payload TEXT NOT NULL,
+			target_output TEXT NOT NULL,
+			status TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS evaluations (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			dataset_id TEXT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+			prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+			target_model TEXT NOT NULL,
+			judge_model TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS evaluation_results (
+			id TEXT PRIMARY KEY,
+			evaluation_id TEXT NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
+			dataset_item_id TEXT NOT NULL REFERENCES dataset_items(id) ON DELETE CASCADE,
+			score REAL NOT NULL,
+			rationale TEXT NOT NULL,
+			passed INTEGER NOT NULL DEFAULT 0,
+			latency_ms INTEGER NOT NULL DEFAULT 0,
+			cost_usd REAL NOT NULL DEFAULT 0.0,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_dataset_items_dataset ON dataset_items(dataset_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_evaluations_dataset ON evaluations(dataset_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_evaluation_results_eval ON evaluation_results(evaluation_id)`,
 	}
 	for _, stmt := range schema {
 		if _, err := s.execContext(ctx, stmt); err != nil {
@@ -484,103 +523,6 @@ func scanRun(row scanner) (Run, error) {
 	run.UpdatedAt = parseTime(updated)
 	run.CompletedAt = parseTime(completed)
 	return run, nil
-}
-
-func scanWorker(row scanner) (Worker, error) {
-	var worker Worker
-	var kind, status string
-	var modelOptions string
-	var created, updated, completed string
-	if err := row.Scan(&worker.ID, &worker.RunID, &worker.LaunchID, &worker.Attempt, &worker.RoleID, &kind, &worker.RoleTitle, &worker.Backend, &worker.Provider, &worker.Model, &modelOptions, &worker.Agent, &status, &worker.RuntimeSessionID, &worker.RuntimeProviderSessionID, &worker.RuntimeTranscriptPath, &worker.RuntimePID, &worker.Result, &worker.ResultJSON, &worker.Error, &created, &updated, &completed); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Worker{}, fmt.Errorf("worker not found")
-		}
-		return Worker{}, wrapErr("scan worker", err)
-	}
-	if worker.Attempt == 0 {
-		worker.Attempt = 1
-	}
-	worker.RoleKind = RoleKind(kind)
-	worker.ModelOptions = api.ParseModelOptionsJSON(modelOptions)
-	worker.Status = WorkerStatus(status)
-	worker.CreatedAt = parseTime(created)
-	worker.UpdatedAt = parseTime(updated)
-	worker.CompletedAt = parseTime(completed)
-	return worker, nil
-}
-
-func scanWorkerAttempt(row scanner) (WorkerAttempt, error) {
-	var attempt WorkerAttempt
-	var kind, status string
-	var modelOptions string
-	var created, updated, completed, archived string
-	if err := row.Scan(&attempt.ID, &attempt.WorkerID, &attempt.RunID, &attempt.Attempt, &attempt.LaunchID, &attempt.RoleID, &kind, &attempt.RoleTitle, &attempt.Backend, &attempt.Provider, &attempt.Model, &modelOptions, &attempt.Agent, &status, &attempt.RuntimeSessionID, &attempt.RuntimeProviderSessionID, &attempt.RuntimeTranscriptPath, &attempt.RuntimePID, &attempt.Result, &attempt.ResultJSON, &attempt.Error, &created, &updated, &completed, &archived); err != nil {
-		return WorkerAttempt{}, wrapErr("scan worker attempt", err)
-	}
-	attempt.RoleKind = RoleKind(kind)
-	attempt.ModelOptions = api.ParseModelOptionsJSON(modelOptions)
-	attempt.Status = WorkerStatus(status)
-	attempt.CreatedAt = parseTime(created)
-	attempt.UpdatedAt = parseTime(updated)
-	attempt.CompletedAt = parseTime(completed)
-	attempt.ArchivedAt = parseTime(archived)
-	return attempt, nil
-}
-
-func scanWorkerControl(row scanner) (WorkerControlRequest, error) {
-	var control WorkerControlRequest
-	var action, status string
-	var created, updated string
-	if err := row.Scan(&control.ID, &control.RunID, &control.WorkerID, &action, &status, &control.Error, &created, &updated); err != nil {
-		return WorkerControlRequest{}, wrapErr("scan worker control", err)
-	}
-	control.Action = WorkerControlAction(action)
-	control.Status = WorkerControlStatus(status)
-	control.CreatedAt = parseTime(created)
-	control.UpdatedAt = parseTime(updated)
-	return control, nil
-}
-
-func scanRuntimeRequest(row scanner) (RuntimeRequest, error) {
-	var request RuntimeRequest
-	var status, responseStatus string
-	var created, updated, responded string
-	if err := row.Scan(
-		&request.ID,
-		&request.RunID,
-		&request.WorkerID,
-		&request.RequestID,
-		&request.RuntimeSessionID,
-		&request.RuntimeProviderSessionID,
-		&request.Runtime,
-		&request.Kind,
-		&request.NativeMethod,
-		&status,
-		&request.Summary,
-		&request.TurnID,
-		&request.RequestJSON,
-		&responseStatus,
-		&request.ResponseAction,
-		&request.ResponseText,
-		&request.ResponseOptionID,
-		&request.ResponseAnswersJSON,
-		&request.ResponseError,
-		&request.ResponseJSON,
-		&created,
-		&updated,
-		&responded,
-	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return RuntimeRequest{}, fmt.Errorf("runtime request not found")
-		}
-		return RuntimeRequest{}, wrapErr("scan runtime request", err)
-	}
-	request.Status = RuntimeRequestStatus(status)
-	request.ResponseStatus = RuntimeResponseStatus(responseStatus)
-	request.CreatedAt = parseTime(created)
-	request.UpdatedAt = parseTime(updated)
-	request.RespondedAt = parseTime(responded)
-	return request, nil
 }
 
 func formatTime(t time.Time) string {
