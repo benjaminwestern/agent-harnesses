@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -26,5 +27,18 @@ func TestSendInputRejectsContentParts(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "does not support multimodal content parts") {
 		t.Fatalf("error = %q", err.Error())
+	}
+}
+
+func TestClaudeBridgeCandidatesIncludePublicProviderPath(t *testing.T) {
+	candidates := claudeBridgeCandidates(
+		"/repo/.artifacts/bin/agent_control",
+		"/repo",
+		"/repo/pkg/providers/claude/provider.go",
+	)
+
+	want := "/repo/pkg/providers/claude/sdkbridge/bridge.mjs"
+	if !slices.Contains(candidates, want) {
+		t.Fatalf("bridge candidates = %#v, want %q", candidates, want)
 	}
 }

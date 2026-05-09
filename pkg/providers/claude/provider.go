@@ -928,23 +928,18 @@ func claudeBridgeCommand() (string, []string, error) {
 func locateClaudeBridge() (string, error) {
 	candidates := make([]string, 0, 4)
 
+	var executablePath string
 	if executable, err := os.Executable(); err == nil {
-		candidates = append(candidates,
-			filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "..", "internal", "controlplane", "providers", "claude", "sdkbridge", "bridge.mjs")),
-			filepath.Clean(filepath.Join(filepath.Dir(executable), "internal", "controlplane", "providers", "claude", "sdkbridge", "bridge.mjs")),
-		)
+		executablePath = executable
 	}
+	candidates = append(candidates, claudeBridgeCandidates(executablePath, "", "")...)
 
 	if workingDir, err := os.Getwd(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(workingDir, "internal", "controlplane", "providers", "claude", "sdkbridge", "bridge.mjs"),
-		)
+		candidates = append(candidates, claudeBridgeCandidates("", workingDir, "")...)
 	}
 
 	if _, sourceFile, _, ok := runtime.Caller(0); ok {
-		candidates = append(candidates,
-			filepath.Join(filepath.Dir(sourceFile), "sdkbridge", "bridge.mjs"),
-		)
+		candidates = append(candidates, claudeBridgeCandidates("", "", sourceFile)...)
 	}
 
 	for _, candidate := range candidates {
@@ -954,6 +949,30 @@ func locateClaudeBridge() (string, error) {
 	}
 
 	return "", errors.New("could not locate the Claude SDK bridge; run `mise run build` from the repository root to install bridge dependencies")
+}
+
+func claudeBridgeCandidates(executable, workingDir, sourceFile string) []string {
+	candidates := make([]string, 0, 8)
+	if executable != "" {
+		executableDir := filepath.Dir(executable)
+		candidates = append(candidates,
+			filepath.Clean(filepath.Join(executableDir, "..", "..", "pkg", "providers", "claude", "sdkbridge", "bridge.mjs")),
+			filepath.Clean(filepath.Join(executableDir, "..", "pkg", "providers", "claude", "sdkbridge", "bridge.mjs")),
+			filepath.Clean(filepath.Join(executableDir, "pkg", "providers", "claude", "sdkbridge", "bridge.mjs")),
+			filepath.Clean(filepath.Join(executableDir, "..", "..", "internal", "controlplane", "providers", "claude", "sdkbridge", "bridge.mjs")),
+			filepath.Clean(filepath.Join(executableDir, "internal", "controlplane", "providers", "claude", "sdkbridge", "bridge.mjs")),
+		)
+	}
+	if workingDir != "" {
+		candidates = append(candidates,
+			filepath.Join(workingDir, "pkg", "providers", "claude", "sdkbridge", "bridge.mjs"),
+			filepath.Join(workingDir, "internal", "controlplane", "providers", "claude", "sdkbridge", "bridge.mjs"),
+		)
+	}
+	if sourceFile != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(sourceFile), "sdkbridge", "bridge.mjs"))
+	}
+	return candidates
 }
 
 func fileExists(path string) bool {
