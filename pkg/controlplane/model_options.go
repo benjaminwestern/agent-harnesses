@@ -9,6 +9,9 @@ func HasModelOptions(options ModelOptions) bool {
 	return strings.TrimSpace(options.ReasoningEffort) != "" ||
 		strings.TrimSpace(options.ThinkingLevel) != "" ||
 		options.ThinkingBudget != nil ||
+		options.MaxOutputTokens > 0 ||
+		options.Temperature != nil ||
+		options.TopP != nil ||
 		strings.TrimSpace(options.BaseURL) != "" ||
 		strings.TrimSpace(options.APIKey) != "" ||
 		strings.TrimSpace(options.OAuthTokenURL) != "" ||
@@ -31,6 +34,15 @@ func MergeModelOptions(values ...ModelOptions) ModelOptions {
 		}
 		if value.ThinkingBudget != nil {
 			out.ThinkingBudget = value.ThinkingBudget
+		}
+		if value.MaxOutputTokens > 0 {
+			out.MaxOutputTokens = value.MaxOutputTokens
+		}
+		if value.Temperature != nil {
+			out.Temperature = value.Temperature
+		}
+		if value.TopP != nil {
+			out.TopP = value.TopP
 		}
 		if strings.TrimSpace(value.BaseURL) != "" {
 			out.BaseURL = strings.TrimSpace(value.BaseURL)

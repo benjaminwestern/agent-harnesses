@@ -23,14 +23,35 @@ type Client struct {
 	oauthClientID     string
 	oauthClientSecret string
 	httpClient        *http.Client
+	retryPolicy       RetryPolicy
 
 	tokenMu        sync.Mutex
 	cachedToken    string
 	tokenExpiresAt time.Time
 }
 
+type RetryPolicy struct {
+	MaxAttempts int
+	Backoff     time.Duration
+}
+
+type ClientOptions struct {
+	APIKey            string
+	OAuthTokenURL     string
+	OAuthClientID     string
+	OAuthClientSecret string
+	HTTPClient        *http.Client
+	Timeout           time.Duration
+	RetryPolicy       RetryPolicy
+}
+
 // NewClient creates a new Client.
 func NewClient(baseURL, apiKeyEnv string) *Client {
+	return NewClientWithOptions(baseURL, apiKeyEnv, ClientOptions{})
+}
+
+// NewClientWithOptions creates a new Client with transport and auth controls.
+func NewClientWithOptions(baseURL, apiKeyEnv string, options ClientOptions) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL()
 	}
@@ -40,13 +61,27 @@ func NewClient(baseURL, apiKeyEnv string) *Client {
 	if apiKeyEnv != "" {
 		apiKey = os.Getenv(apiKeyEnv)
 	}
+	if options.APIKey != "" {
+		apiKey = options.APIKey
+	}
+
+	httpClient := options.HTTPClient
+	if httpClient == nil {
+		timeout := options.Timeout
+		if timeout <= 0 {
+			timeout = 120 * time.Second
+		}
+		httpClient = &http.Client{Timeout: timeout}
+	}
 
 	return &Client{
-		baseURL: baseURL,
-		apiKey:  apiKey,
-		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		baseURL:           baseURL,
+		apiKey:            apiKey,
+		oauthTokenURL:     options.OAuthTokenURL,
+		oauthClientID:     options.OAuthClientID,
+		oauthClientSecret: options.OAuthClientSecret,
+		httpClient:        httpClient,
+		retryPolicy:       options.RetryPolicy,
 	}
 }
 
@@ -141,7 +176,7 @@ func (c *Client) CreateChatCompletion(ctx context.Context, req ChatCompletionReq
 		return nil, err
 	}
 	if resp.Error != nil && resp.Error.Message != "" {
-		return nil, fmt.Errorf("api error: %s", resp.Error.Message)
+		return nil, &APIError{Kind: ErrorKindAPI, Operation: "chat.completions", Message: resp.Error.Message, Type: resp.Error.Type, Param: resp.Error.Param, Code: resp.Error.Code}
 	}
 	return &resp, nil
 }
@@ -177,11 +212,8 @@ func (c *Client) StreamChatCompletion(ctx context.Context, req ChatCompletionReq
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		var apiErr Error
-		if jsonErr := json.Unmarshal(body, &apiErr); jsonErr == nil && apiErr.Message != "" {
-			return nil, nil, fmt.Errorf("api error %d: %s", resp.StatusCode, apiErr.Message)
-		}
-		return nil, nil, fmt.Errorf("http error %d: %s", resp.StatusCode, string(body))
+		apiErr := apiErrorFromResponse(http.MethodPost, c.baseURL+"/chat/completions", resp.StatusCode, body)
+		return nil, nil, apiErr
 	}
 
 	responses := make(chan *ChatCompletionResponse, 100)
@@ -240,44 +272,21 @@ func (c *Client) CreateEmbeddings(ctx context.Context, req EmbeddingRequest) (*E
 		return nil, err
 	}
 	if resp.Error != nil && resp.Error.Message != "" {
-		return nil, fmt.Errorf("api error: %s", resp.Error.Message)
+		return nil, &APIError{Kind: ErrorKindAPI, Operation: "embeddings", Message: resp.Error.Message, Type: resp.Error.Type, Param: resp.Error.Param, Code: resp.Error.Code}
 	}
 	return &resp, nil
 }
 
 // ListModels sends a GET request to the /v1/models endpoint.
 func (c *Client) ListModels(ctx context.Context) (*ModelListResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	token, err := c.getBearerToken(ctx)
+	body, err := c.doJSON(ctx, http.MethodGet, "/models", nil)
 	if err != nil {
 		return nil, err
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		var apiErr Error
-		if jsonErr := json.Unmarshal(body, &apiErr); jsonErr == nil && apiErr.Message != "" {
-			return nil, fmt.Errorf("api error %d: %s", resp.StatusCode, apiErr.Message)
-		}
-		return nil, fmt.Errorf("http error %d: %s", resp.StatusCode, string(body))
-	}
 
 	var listResp ModelListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&listResp); err != nil {
+		return nil, &APIError{Kind: ErrorKindDecode, Operation: "models.list", Cause: err}
 	}
 
 	return &listResp, nil
@@ -288,16 +297,66 @@ func (c *Client) postJSON(ctx context.Context, path string, payload any, respons
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	token, err := c.getBearerToken(ctx)
+	body, err := c.doJSON(ctx, http.MethodPost, path, data)
 	if err != nil {
 		return err
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(responseTarget); err != nil {
+		return &APIError{Kind: ErrorKindDecode, Operation: strings.Trim(path, "/"), Cause: err}
+	}
+
+	return nil
+}
+
+func (c *Client) doJSON(ctx context.Context, method string, path string, data []byte) ([]byte, error) {
+	attempts := c.retryPolicy.MaxAttempts
+	if attempts <= 0 {
+		attempts = 1
+	}
+	if attempts > 10 {
+		attempts = 10
+	}
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		body, retryable, err := c.doJSONOnce(ctx, method, path, data)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+		if !retryable || attempt == attempts {
+			break
+		}
+		backoff := c.retryPolicy.Backoff
+		if backoff <= 0 {
+			backoff = 100 * time.Millisecond
+		}
+		timer := time.NewTimer(backoff * time.Duration(attempt))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
+func (c *Client) doJSONOnce(ctx context.Context, method string, path string, data []byte) ([]byte, bool, error) {
+	var body io.Reader
+	if data != nil {
+		body = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return nil, false, &APIError{Kind: ErrorKindRequest, Method: method, URL: c.baseURL + path, Cause: err}
+	}
+
+	if data != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	token, err := c.getBearerToken(ctx)
+	if err != nil {
+		return nil, false, &APIError{Kind: ErrorKindAuth, Method: method, URL: c.baseURL + path, Cause: err}
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -305,22 +364,59 @@ func (c *Client) postJSON(ctx context.Context, path string, payload any, respons
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("http request failed: %w", err)
+		apiErr := &APIError{Kind: ErrorKindTransport, Method: method, URL: c.baseURL + path, Cause: err, Retryable: true}
+		return nil, true, apiErr
 	}
 	defer func() { _ = resp.Body.Close() }()
+	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		var apiErr Error
-		if jsonErr := json.Unmarshal(body, &apiErr); jsonErr == nil && apiErr.Message != "" {
-			return fmt.Errorf("api error %d: %s", resp.StatusCode, apiErr.Message)
+		apiErr := apiErrorFromResponse(method, c.baseURL+path, resp.StatusCode, respBody)
+		return nil, apiErr.Retryable, apiErr
+	}
+	return respBody, false, nil
+}
+
+func apiErrorFromResponse(method string, requestURL string, statusCode int, body []byte) *APIError {
+	var apiErr Error
+	if jsonErr := json.Unmarshal(body, &apiErr); jsonErr == nil && apiErr.Message != "" {
+		return &APIError{
+			Kind:       ErrorKindAPI,
+			Method:     method,
+			URL:        requestURL,
+			StatusCode: statusCode,
+			Message:    apiErr.Message,
+			Type:       apiErr.Type,
+			Param:      apiErr.Param,
+			Code:       apiErr.Code,
+			Body:       string(body),
+			Retryable:  retryableStatus(statusCode),
 		}
-		return fmt.Errorf("http error %d: %s", resp.StatusCode, string(body))
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(responseTarget); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+	var wrapped struct {
+		Error Error `json:"error"`
 	}
-
-	return nil
+	if jsonErr := json.Unmarshal(body, &wrapped); jsonErr == nil && wrapped.Error.Message != "" {
+		return &APIError{
+			Kind:       ErrorKindAPI,
+			Method:     method,
+			URL:        requestURL,
+			StatusCode: statusCode,
+			Message:    wrapped.Error.Message,
+			Type:       wrapped.Error.Type,
+			Param:      wrapped.Error.Param,
+			Code:       wrapped.Error.Code,
+			Body:       string(body),
+			Retryable:  retryableStatus(statusCode),
+		}
+	}
+	return &APIError{
+		Kind:       ErrorKindHTTP,
+		Method:     method,
+		URL:        requestURL,
+		StatusCode: statusCode,
+		Message:    string(body),
+		Body:       string(body),
+		Retryable:  retryableStatus(statusCode),
+	}
 }

@@ -7,6 +7,7 @@ import (
 	internal "github.com/benjaminwestern/agentic-control/internal/controlplane"
 	"github.com/benjaminwestern/agentic-control/pkg/contract"
 	api "github.com/benjaminwestern/agentic-control/pkg/controlplane"
+	"github.com/benjaminwestern/agentic-control/pkg/controlplane/builtin"
 	"github.com/benjaminwestern/agentic-control/pkg/providers/claude"
 	"github.com/benjaminwestern/agentic-control/pkg/providers/codex"
 	"github.com/benjaminwestern/agentic-control/pkg/providers/gemini"
@@ -37,6 +38,12 @@ func New() *ControlPlane {
 		openaicompatible.NewProvider(emit, cfg.Runtimes["openai-compatible"]),
 	)
 	return &ControlPlane{service: service}
+}
+
+// NewOneShot exposes all built-in downstream providers through request/response
+// routers without constructing the session/workspace control-plane service.
+func NewOneShot() *api.OneShot {
+	return builtin.NewOneShot()
 }
 
 func (c *ControlPlane) Close() error {

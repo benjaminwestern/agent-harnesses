@@ -26,6 +26,19 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"` // JSON encoded arguments
 }
 
+// ToolDefinition describes a tool/function made available to a chat model.
+type ToolDefinition struct {
+	Type     string             `json:"type"`
+	Function FunctionDefinition `json:"function"`
+}
+
+// FunctionDefinition describes an OpenAI-compatible function tool.
+type FunctionDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
 // ChatContentPart represents a part of a message content (e.g., text, image).
 type ChatContentPart struct {
 	Type     string        `json:"type"`
@@ -55,16 +68,18 @@ type JSONSchemaDef struct {
 
 // ChatCompletionRequest is the payload sent to /v1/chat/completions
 type ChatCompletionRequest struct {
-	Model           string          `json:"model"`
-	Messages        []ChatMessage   `json:"messages"`
-	MaxTokens       int             `json:"max_tokens,omitempty"`
-	Temperature     *float64        `json:"temperature,omitempty"`
-	TopP            *float64        `json:"top_p,omitempty"`
-	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
-	Stream          bool            `json:"stream,omitempty"`
-	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
-	Logprobs        bool            `json:"logprobs,omitempty"`
-	TopLogprobs     int             `json:"top_logprobs,omitempty"`
+	Model           string           `json:"model"`
+	Messages        []ChatMessage    `json:"messages"`
+	Tools           []ToolDefinition `json:"tools,omitempty"`
+	ToolChoice      any              `json:"tool_choice,omitempty"`
+	MaxTokens       int              `json:"max_tokens,omitempty"`
+	Temperature     *float64         `json:"temperature,omitempty"`
+	TopP            *float64         `json:"top_p,omitempty"`
+	ResponseFormat  *ResponseFormat  `json:"response_format,omitempty"`
+	Stream          bool             `json:"stream,omitempty"`
+	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
+	Logprobs        bool             `json:"logprobs,omitempty"`
+	TopLogprobs     int              `json:"top_logprobs,omitempty"`
 }
 
 type TokenLogprob struct {

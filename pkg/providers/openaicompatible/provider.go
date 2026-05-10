@@ -23,7 +23,7 @@ type Provider struct {
 	sessions        map[string]*session
 	emit            eventSink
 	configModels    []contract.RuntimeModel
-	configEndpoints []config.OpenAICompatibleEndpoint
+	configEndpoints []EndpointConfig
 }
 
 type session struct {
@@ -42,7 +42,7 @@ type session struct {
 	provider     *Provider
 }
 
-func resolveAPIKey(ep config.OpenAICompatibleEndpoint) string {
+func resolveAPIKey(ep EndpointConfig) string {
 	if ep.APIKeyEnv != "" {
 		if val := os.Getenv(ep.APIKeyEnv); val != "" {
 			return val
@@ -52,14 +52,19 @@ func resolveAPIKey(ep config.OpenAICompatibleEndpoint) string {
 }
 
 func NewProvider(emit func(contract.RuntimeEvent), cfg config.RuntimeConfig) *Provider {
+	return NewProviderFromConfig(emit, providerConfigFromInternal(cfg))
+}
+
+func NewProviderFromConfig(emit func(contract.RuntimeEvent), cfg ProviderConfig) *Provider {
 	var models []contract.RuntimeModel
 	for _, ep := range cfg.Endpoints {
 		for _, m := range ep.Models {
 			models = append(models, contract.RuntimeModel{
-				ID:       m,
-				Label:    m,
-				Provider: ep.Provider,
-				Custom:   true,
+				ID:           m,
+				Label:        m,
+				Provider:     ep.Provider,
+				Custom:       true,
+				Capabilities: openAICompatibleModelCapabilities(m),
 				DefaultOptions: map[string]any{
 					"base_url":            ep.BaseURL,
 					"api_key":             resolveAPIKey(ep),
@@ -76,6 +81,7 @@ func NewProvider(emit func(contract.RuntimeEvent), cfg config.RuntimeConfig) *Pr
 			Label:          customModel.Label,
 			Provider:       customModel.Provider,
 			Custom:         true,
+			Capabilities:   openAICompatibleModelCapabilities(customModel.ID),
 			DefaultOptions: customModel.Options,
 		})
 	}
@@ -84,8 +90,36 @@ func NewProvider(emit func(contract.RuntimeEvent), cfg config.RuntimeConfig) *Pr
 		sessions:        make(map[string]*session),
 		emit:            emit,
 		configModels:    models,
-		configEndpoints: append([]config.OpenAICompatibleEndpoint(nil), cfg.Endpoints...),
+		configEndpoints: append([]EndpointConfig(nil), cfg.Endpoints...),
 	}
+}
+
+func providerConfigFromInternal(cfg config.RuntimeConfig) ProviderConfig {
+	out := ProviderConfig{
+		Models:    make([]ModelConfig, 0, len(cfg.Models)),
+		Endpoints: make([]EndpointConfig, 0, len(cfg.Endpoints)),
+	}
+	for _, model := range cfg.Models {
+		out.Models = append(out.Models, ModelConfig{
+			ID:       model.ID,
+			Label:    model.Label,
+			Provider: model.Provider,
+			Options:  model.Options,
+		})
+	}
+	for _, endpoint := range cfg.Endpoints {
+		out.Endpoints = append(out.Endpoints, EndpointConfig{
+			Provider:          endpoint.Provider,
+			BaseURL:           endpoint.BaseURL,
+			APIKeyEnv:         endpoint.APIKeyEnv,
+			APIKey:            endpoint.APIKey,
+			Models:            append([]string(nil), endpoint.Models...),
+			OAuthTokenURL:     endpoint.OAuthTokenURL,
+			OAuthClientID:     endpoint.OAuthClientID,
+			OAuthClientSecret: endpoint.OAuthClientSecret,
+		})
+	}
+	return out
 }
 
 func (p *Provider) Runtime() string {
@@ -120,7 +154,7 @@ func (p *Provider) Describe() contract.RuntimeDescriptor {
 
 	p.mu.RLock()
 	models = append(models, p.configModels...)
-	endpoints := append([]config.OpenAICompatibleEndpoint(nil), p.configEndpoints...)
+	endpoints := append([]EndpointConfig(nil), p.configEndpoints...)
 	p.mu.RUnlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -131,13 +165,8 @@ func (p *Provider) Describe() contract.RuntimeDescriptor {
 		models = append(models, discovered...)
 	}
 	for _, endpoint := range endpoints {
-		client := openAIClientForOptions(api.ModelOptions{
-			BaseURL:           endpoint.BaseURL,
-			APIKey:            resolveAPIKey(endpoint),
-			OAuthTokenURL:     endpoint.OAuthTokenURL,
-			OAuthClientID:     endpoint.OAuthClientID,
-			OAuthClientSecret: endpoint.OAuthClientSecret,
-		})
+		endpoint.APIKey = resolveAPIKey(endpoint)
+		client := endpoint.client()
 		if discovered := listOpenAICompatibleModels(ctx, client, endpoint.Provider); len(discovered) > 0 {
 			installed = true
 			models = append(models, discovered...)
@@ -154,9 +183,17 @@ func (p *Provider) Describe() contract.RuntimeDescriptor {
 }
 
 func listOpenAICompatibleModels(ctx context.Context, client *openaicompat.Client, provider string) []contract.RuntimeModel {
-	listResp, err := client.ListModels(ctx)
+	models, err := listOpenAICompatibleModelsWithError(ctx, client, provider)
 	if err != nil {
 		return nil
+	}
+	return models
+}
+
+func listOpenAICompatibleModelsWithError(ctx context.Context, client *openaicompat.Client, provider string) ([]contract.RuntimeModel, error) {
+	listResp, err := client.ListModels(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(provider) == "" {
 		provider = "openai-compatible"
@@ -164,13 +201,31 @@ func listOpenAICompatibleModels(ctx context.Context, client *openaicompat.Client
 	models := make([]contract.RuntimeModel, 0, len(listResp.Data))
 	for _, m := range listResp.Data {
 		models = append(models, contract.RuntimeModel{
-			ID:       m.ID,
-			Label:    m.ID,
-			Provider: provider,
-			Custom:   true,
+			ID:           m.ID,
+			Label:        m.ID,
+			Provider:     provider,
+			Custom:       true,
+			Capabilities: openAICompatibleModelCapabilities(m.ID),
 		})
 	}
-	return models
+	return models, nil
+}
+
+func openAICompatibleModelCapabilities(modelID string) contract.RuntimeModelCapabilities {
+	normalized := strings.ToLower(strings.TrimSpace(modelID))
+	if strings.Contains(normalized, "embed") || strings.Contains(normalized, "embedding") {
+		return contract.RuntimeModelCapabilities{
+			Tasks:            []contract.RuntimeModelTask{contract.RuntimeModelTaskEmbeddings},
+			InputModalities:  []contract.RuntimeModelModality{contract.RuntimeModelModalityText},
+			OutputModalities: []contract.RuntimeModelModality{contract.RuntimeModelModalityEmbedding},
+		}
+	}
+	return contract.RuntimeModelCapabilities{
+		Tasks:               []contract.RuntimeModelTask{contract.RuntimeModelTaskTextGeneration},
+		InputModalities:     []contract.RuntimeModelModality{contract.RuntimeModelModalityText},
+		OutputModalities:    []contract.RuntimeModelModality{contract.RuntimeModelModalityText},
+		SupportsToolCalling: true,
+	}
 }
 
 func (p *Provider) StartSession(ctx context.Context, request api.StartSessionRequest) (*contract.RuntimeSession, error) {
@@ -450,40 +505,18 @@ func (p *Provider) StopSession(ctx context.Context, sessionID string) (*contract
 }
 
 func (p *Provider) GenerateEmbeddings(ctx context.Context, input api.EmbeddingInput) (*api.EmbeddingOutput, error) {
-	model := input.ModelSelection.Model
-	if model == "" {
-		model = "nomic-embed-text"
+	return NewService(endpointConfigFromEmbeddingSelection(input.ModelSelection)).GenerateEmbeddings(ctx, input)
+}
+
+func endpointConfigFromEmbeddingSelection(selection api.EmbeddingModelSelection) EndpointConfig {
+	return EndpointConfig{
+		Provider:          selection.Provider,
+		BaseURL:           selection.Options.BaseURL,
+		APIKey:            selection.Options.APIKey,
+		OAuthTokenURL:     selection.Options.OAuthTokenURL,
+		OAuthClientID:     selection.Options.OAuthClientID,
+		OAuthClientSecret: selection.Options.OAuthClientSecret,
 	}
-
-	baseURL := input.ModelSelection.Options.BaseURL
-	apiKey := input.ModelSelection.Options.APIKey
-
-	client := openAIClientForOptions(api.ModelOptions{
-		BaseURL:           baseURL,
-		APIKey:            apiKey,
-		OAuthTokenURL:     input.ModelSelection.Options.OAuthTokenURL,
-		OAuthClientID:     input.ModelSelection.Options.OAuthClientID,
-		OAuthClientSecret: input.ModelSelection.Options.OAuthClientSecret,
-	})
-
-	resp, err := client.CreateEmbeddings(ctx, openaicompat.EmbeddingRequest{
-		Model: model,
-		Input: input.Texts,
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("openai-compatible embedding failed: %w", err)
-	}
-
-	vectors := make([][]float64, 0, len(resp.Data))
-	for _, item := range resp.Data {
-		vectors = append(vectors, item.Embedding)
-	}
-
-	return &api.EmbeddingOutput{
-		Vectors:  vectors,
-		Metadata: map[string]any{"model": resp.Model, "usage": resp.Usage},
-	}, nil
 }
 
 func (p *Provider) ListSessions(ctx context.Context) ([]contract.RuntimeSession, error) {

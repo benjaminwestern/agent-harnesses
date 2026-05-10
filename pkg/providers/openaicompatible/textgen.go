@@ -166,48 +166,7 @@ func (p *Provider) GenerateThreadTitle(ctx context.Context, input api.ThreadTitl
 }
 
 func (p *Provider) GenerateText(ctx context.Context, input api.GenerateTextInput) (*api.GenerateTextOutput, error) {
-	model := input.ModelSelection.Model
-	if model == "" {
-		model = "ollama"
-	}
-
-	client := openAIClientForOptions(input.ModelSelection.Options)
-
-	messages := make([]openaicompat.ChatMessage, 0, 2)
-	if input.SystemPrompt != "" {
-		messages = append(messages, openaicompat.ChatMessage{Role: "system", Content: input.SystemPrompt})
-	}
-	if input.Prompt != "" {
-		messages = append(messages, openaicompat.ChatMessage{Role: "user", Content: input.Prompt})
-	}
-
-	req := openaicompat.ChatCompletionRequest{
-		Model:    model,
-		Messages: messages,
-		Stream:   false,
-	}
-
-	switch input.ResponseFormat {
-	case "json", "json_object":
-		req.ResponseFormat = &openaicompat.ResponseFormat{Type: "json_object"}
-	case "text":
-		req.ResponseFormat = &openaicompat.ResponseFormat{Type: "text"}
-	}
-	applyChatModelOptions(&req, input.ModelSelection.Options)
-
-	resp, err := client.CreateChatCompletion(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("openai-compatible text generation failed: %w", err)
-	}
-
-	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("no choices returned")
-	}
-
-	return &api.GenerateTextOutput{
-		Text:     openaicompat.MessageContentText(resp.Choices[0].Message.Content),
-		Metadata: map[string]any{"model": resp.Model, "usage": resp.Usage},
-	}, nil
+	return NewService(endpointConfigFromSelection(input.ModelSelection)).GenerateText(ctx, input)
 }
 
 func openAIClientForOptions(options api.ModelOptions) *openaicompat.Client {
@@ -226,6 +185,9 @@ func applyChatModelOptions(req *openaicompat.ChatCompletionRequest, options api.
 	req.ReasoningEffort = options.ReasoningEffort
 	req.Logprobs = options.Logprobs
 	req.TopLogprobs = options.TopLogprobs
+	req.MaxTokens = options.MaxOutputTokens
+	req.Temperature = options.Temperature
+	req.TopP = options.TopP
 	if options.ResponseSchema != nil {
 		req.ResponseFormat = &openaicompat.ResponseFormat{
 			Type: "json_schema",
@@ -235,5 +197,16 @@ func applyChatModelOptions(req *openaicompat.ChatCompletionRequest, options api.
 				Schema: options.ResponseSchema,
 			},
 		}
+	}
+}
+
+func endpointConfigFromSelection(selection api.TextGenerationModelSelection) EndpointConfig {
+	return EndpointConfig{
+		Provider:          selection.Provider,
+		BaseURL:           selection.Options.BaseURL,
+		APIKey:            selection.Options.APIKey,
+		OAuthTokenURL:     selection.Options.OAuthTokenURL,
+		OAuthClientID:     selection.Options.OAuthClientID,
+		OAuthClientSecret: selection.Options.OAuthClientSecret,
 	}
 }

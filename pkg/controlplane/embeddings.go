@@ -4,17 +4,20 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type EmbeddingInput struct {
 	ModelSelection EmbeddingModelSelection
 	Texts          []string
+	Dimensions     int
 	Metadata       map[string]any
 }
 
 type EmbeddingOutput struct {
-	Vectors  [][]float64
-	Metadata map[string]any
+	Vectors        [][]float64
+	Metadata       map[string]any
+	ProviderResult ProviderResultMetadata
 }
 
 type EmbeddingProvider interface {
@@ -22,10 +25,11 @@ type EmbeddingProvider interface {
 }
 
 type EmbeddingModelSelection struct {
-	Provider  string
-	Model     string
-	Options   ModelOptions
-	Fallbacks []string
+	Provider   string
+	Model      string
+	Dimensions int
+	Options    ModelOptions
+	Fallbacks  []string
 }
 
 type EmbeddingRouter struct {
@@ -116,6 +120,7 @@ func (r *EmbeddingRouter) resolveProviderName(selection EmbeddingModelSelection)
 }
 
 func (r *EmbeddingRouter) GenerateEmbeddings(ctx context.Context, providerName string, input EmbeddingInput) (*EmbeddingOutput, error) {
+	started := time.Now()
 	if providerName != "" {
 		input.ModelSelection.Provider = providerName
 	}
@@ -124,7 +129,24 @@ func (r *EmbeddingRouter) GenerateEmbeddings(ctx context.Context, providerName s
 	if err != nil {
 		return nil, err
 	}
-	return provider.GenerateEmbeddings(ctx, input)
+	out, err := provider.GenerateEmbeddings(ctx, input)
+	if err != nil || out == nil {
+		return out, err
+	}
+	if out.ProviderResult.Provider == "" {
+		out.ProviderResult.Provider = input.ModelSelection.Provider
+	}
+	if out.ProviderResult.Model == "" {
+		out.ProviderResult.Model = input.ModelSelection.Model
+	}
+	if out.ProviderResult.LatencyMillis == 0 {
+		out.ProviderResult.LatencyMillis = time.Since(started).Milliseconds()
+	}
+	if out.ProviderResult.Usage.VectorCount == 0 {
+		out.ProviderResult.Usage.VectorCount = len(out.Vectors)
+	}
+	out.Metadata = mergeProviderMetadata(out.Metadata, out.ProviderResult)
+	return out, nil
 }
 
 func (r *EmbeddingRouter) GenerateEmbeddingsForSelection(ctx context.Context, input EmbeddingInput) (*EmbeddingOutput, error) {

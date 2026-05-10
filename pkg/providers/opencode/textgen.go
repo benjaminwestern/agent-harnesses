@@ -12,9 +12,9 @@ import (
 )
 
 func (p *Provider) GenerateText(ctx context.Context, input api.GenerateTextInput) (*api.GenerateTextOutput, error) {
-	prompt := input.Prompt
+	prompt := api.GenerateTextPrompt(input)
 	if input.SystemPrompt != "" {
-		prompt = fmt.Sprintf("System Instructions: %s\n\n%s", input.SystemPrompt, input.Prompt)
+		prompt = fmt.Sprintf("System Instructions: %s\n\n%s", input.SystemPrompt, prompt)
 	}
 
 	args := []string{"run"}

@@ -200,18 +200,39 @@ type RuntimeModelOption struct {
 	IsDefault bool   `json:"is_default,omitempty"`
 }
 
+type RuntimeModelTask string
+
+const (
+	RuntimeModelTaskTextGeneration RuntimeModelTask = "text_generation"
+	RuntimeModelTaskEmbeddings     RuntimeModelTask = "embeddings"
+)
+
+type RuntimeModelModality string
+
+const (
+	RuntimeModelModalityText      RuntimeModelModality = "text"
+	RuntimeModelModalityImage     RuntimeModelModality = "image"
+	RuntimeModelModalityAudio     RuntimeModelModality = "audio"
+	RuntimeModelModalityVideo     RuntimeModelModality = "video"
+	RuntimeModelModalityEmbedding RuntimeModelModality = "embedding"
+)
+
 type RuntimeModelCapabilities struct {
-	ReasoningEffortLevels    []RuntimeModelOption `json:"reasoning_effort_levels,omitempty"`
-	ContextWindowOptions     []RuntimeModelOption `json:"context_window_options,omitempty"`
-	VariantOptions           []RuntimeModelOption `json:"variant_options,omitempty"`
-	AgentOptions             []RuntimeModelOption `json:"agent_options,omitempty"`
-	PromptInjectedEfforts    []string             `json:"prompt_injected_efforts,omitempty"`
-	SupportsFastMode         bool                 `json:"supports_fast_mode,omitempty"`
-	SupportsThinkingToggle   bool                 `json:"supports_thinking_toggle,omitempty"`
-	SupportsThinkingLevel    bool                 `json:"supports_thinking_level,omitempty"`
-	SupportsThinkingBudget   bool                 `json:"supports_thinking_budget,omitempty"`
-	SupportedThinkingLevels  []string             `json:"supported_thinking_levels,omitempty"`
-	SupportedThinkingBudgets []int                `json:"supported_thinking_budgets,omitempty"`
+	Tasks                    []RuntimeModelTask     `json:"tasks,omitempty"`
+	InputModalities          []RuntimeModelModality `json:"input_modalities,omitempty"`
+	OutputModalities         []RuntimeModelModality `json:"output_modalities,omitempty"`
+	SupportsToolCalling      bool                   `json:"supports_tool_calling,omitempty"`
+	ReasoningEffortLevels    []RuntimeModelOption   `json:"reasoning_effort_levels,omitempty"`
+	ContextWindowOptions     []RuntimeModelOption   `json:"context_window_options,omitempty"`
+	VariantOptions           []RuntimeModelOption   `json:"variant_options,omitempty"`
+	AgentOptions             []RuntimeModelOption   `json:"agent_options,omitempty"`
+	PromptInjectedEfforts    []string               `json:"prompt_injected_efforts,omitempty"`
+	SupportsFastMode         bool                   `json:"supports_fast_mode,omitempty"`
+	SupportsThinkingToggle   bool                   `json:"supports_thinking_toggle,omitempty"`
+	SupportsThinkingLevel    bool                   `json:"supports_thinking_level,omitempty"`
+	SupportsThinkingBudget   bool                   `json:"supports_thinking_budget,omitempty"`
+	SupportedThinkingLevels  []string               `json:"supported_thinking_levels,omitempty"`
+	SupportedThinkingBudgets []int                  `json:"supported_thinking_budgets,omitempty"`
 }
 
 type RuntimeModel struct {

@@ -3,7 +3,7 @@ package modelcatalog
 import "github.com/benjaminwestern/agentic-control/pkg/contract"
 
 func Codex() []contract.RuntimeModel {
-	caps := contract.RuntimeModelCapabilities{
+	caps := textGenerationCapabilities(contract.RuntimeModelCapabilities{
 		ReasoningEffortLevels: []contract.RuntimeModelOption{
 			{Value: "xhigh", Label: "Extra High"},
 			{Value: "high", Label: "High", IsDefault: true},
@@ -11,7 +11,7 @@ func Codex() []contract.RuntimeModel {
 			{Value: "low", Label: "Low"},
 		},
 		SupportsFastMode: true,
-	}
+	})
 	return []contract.RuntimeModel{
 		model("gpt-5.4", "GPT-5.4", "codex", true, caps),
 		model("gpt-5.4-mini", "GPT-5.4 Mini", "codex", false, caps),
@@ -24,7 +24,7 @@ func Codex() []contract.RuntimeModel {
 
 func Claude() []contract.RuntimeModel {
 	return []contract.RuntimeModel{
-		model("claude-opus-4-7", "Claude Opus 4.7", "claude", false, contract.RuntimeModelCapabilities{
+		model("claude-opus-4-7", "Claude Opus 4.7", "claude", false, textGenerationCapabilities(contract.RuntimeModelCapabilities{
 			ReasoningEffortLevels: []contract.RuntimeModelOption{
 				{Value: "low", Label: "Low"},
 				{Value: "medium", Label: "Medium"},
@@ -38,8 +38,8 @@ func Claude() []contract.RuntimeModel {
 				{Value: "1m", Label: "1M"},
 			},
 			PromptInjectedEfforts: []string{"ultrathink"},
-		}),
-		model("claude-opus-4-6", "Claude Opus 4.6", "claude", false, contract.RuntimeModelCapabilities{
+		})),
+		model("claude-opus-4-6", "Claude Opus 4.6", "claude", false, textGenerationCapabilities(contract.RuntimeModelCapabilities{
 			ReasoningEffortLevels: []contract.RuntimeModelOption{
 				{Value: "low", Label: "Low"},
 				{Value: "medium", Label: "Medium"},
@@ -53,8 +53,8 @@ func Claude() []contract.RuntimeModel {
 			},
 			PromptInjectedEfforts: []string{"ultrathink"},
 			SupportsFastMode:      true,
-		}),
-		model("claude-opus-4-5", "Claude Opus 4.5", "claude", false, contract.RuntimeModelCapabilities{
+		})),
+		model("claude-opus-4-5", "Claude Opus 4.5", "claude", false, textGenerationCapabilities(contract.RuntimeModelCapabilities{
 			ReasoningEffortLevels: []contract.RuntimeModelOption{
 				{Value: "low", Label: "Low"},
 				{Value: "medium", Label: "Medium"},
@@ -62,8 +62,8 @@ func Claude() []contract.RuntimeModel {
 				{Value: "max", Label: "Max"},
 			},
 			SupportsFastMode: true,
-		}),
-		model("claude-sonnet-4-6", "Claude Sonnet 4.6", "claude", true, contract.RuntimeModelCapabilities{
+		})),
+		model("claude-sonnet-4-6", "Claude Sonnet 4.6", "claude", true, textGenerationCapabilities(contract.RuntimeModelCapabilities{
 			ReasoningEffortLevels: []contract.RuntimeModelOption{
 				{Value: "low", Label: "Low"},
 				{Value: "medium", Label: "Medium"},
@@ -75,23 +75,23 @@ func Claude() []contract.RuntimeModel {
 				{Value: "1m", Label: "1M"},
 			},
 			PromptInjectedEfforts: []string{"ultrathink"},
-		}),
-		model("claude-haiku-4-5", "Claude Haiku 4.5", "claude", false, contract.RuntimeModelCapabilities{
+		})),
+		model("claude-haiku-4-5", "Claude Haiku 4.5", "claude", false, textGenerationCapabilities(contract.RuntimeModelCapabilities{
 			SupportsThinkingToggle: true,
-		}),
+		})),
 	}
 }
 
 func Gemini() []contract.RuntimeModel {
-	levelCaps := contract.RuntimeModelCapabilities{
+	levelCaps := textGenerationCapabilities(contract.RuntimeModelCapabilities{
 		SupportsThinkingLevel:   true,
 		SupportedThinkingLevels: []string{"HIGH", "LOW"},
 		ReasoningEffortLevels: []contract.RuntimeModelOption{
 			{Value: "HIGH", Label: "High", IsDefault: true},
 			{Value: "LOW", Label: "Low"},
 		},
-	}
-	budgetCaps := contract.RuntimeModelCapabilities{
+	})
+	budgetCaps := textGenerationCapabilities(contract.RuntimeModelCapabilities{
 		SupportsThinkingBudget:   true,
 		SupportedThinkingBudgets: []int{-1, 0, 512},
 		ReasoningEffortLevels: []contract.RuntimeModelOption{
@@ -99,7 +99,7 @@ func Gemini() []contract.RuntimeModel {
 			{Value: "0", Label: "None"},
 			{Value: "512", Label: "512 Tokens"},
 		},
-	}
+	})
 	return []contract.RuntimeModel{
 		model("auto-gemini-3", "Auto Gemini 3", "gemini", true, levelCaps),
 		model("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "gemini", false, levelCaps),
@@ -112,7 +112,7 @@ func Gemini() []contract.RuntimeModel {
 }
 
 func Pi() []contract.RuntimeModel {
-	caps := contract.RuntimeModelCapabilities{
+	caps := textGenerationCapabilities(contract.RuntimeModelCapabilities{
 		SupportsThinkingLevel: true,
 		SupportedThinkingLevels: []string{
 			"low",
@@ -126,10 +126,35 @@ func Pi() []contract.RuntimeModel {
 			{Value: "high", Label: "High"},
 			{Value: "xhigh", Label: "Extra High"},
 		},
-	}
+	})
 	return []contract.RuntimeModel{
 		model("pi-default", "Pi Default", "pi", true, caps),
 	}
+}
+
+func textGenerationCapabilities(caps contract.RuntimeModelCapabilities) contract.RuntimeModelCapabilities {
+	caps.Tasks = appendUniqueTask(caps.Tasks, contract.RuntimeModelTaskTextGeneration)
+	caps.InputModalities = appendUniqueModality(caps.InputModalities, contract.RuntimeModelModalityText)
+	caps.OutputModalities = appendUniqueModality(caps.OutputModalities, contract.RuntimeModelModalityText)
+	return caps
+}
+
+func appendUniqueTask(values []contract.RuntimeModelTask, value contract.RuntimeModelTask) []contract.RuntimeModelTask {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func appendUniqueModality(values []contract.RuntimeModelModality, value contract.RuntimeModelModality) []contract.RuntimeModelModality {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func model(id string, label string, provider string, isDefault bool, capabilities contract.RuntimeModelCapabilities) contract.RuntimeModel {

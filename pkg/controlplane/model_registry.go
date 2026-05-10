@@ -180,16 +180,21 @@ func mergeOptionsWithMap(opts ModelOptions, defaults map[string]any) ModelOption
 
 func buildBackendRegistry(descriptor contract.RuntimeDescriptor) contract.RuntimeBackendRegistry {
 	models := mergeRuntimeModels(descriptor.Runtime, builtInModels(descriptor.Runtime), probeModels(descriptor))
+	for i := range models {
+		models[i] = withDefaultCapabilities(descriptor, models[i])
+	}
 	providers := groupModelsByProvider(models)
 	registry := contract.RuntimeBackendRegistry{
-		Backend:         descriptor.Runtime,
-		DisplayName:     backendDisplayName(descriptor.Runtime),
-		Installed:       descriptor.Probe == nil || descriptor.Probe.Installed,
-		SupportsSession: descriptor.Capabilities.StartSession && descriptor.Capabilities.StreamEvents,
-		ModelSource:     modelSource(descriptor),
-		Models:          models,
-		Providers:       providers,
-		Issues:          backendIssues(descriptor),
+		Backend:                descriptor.Runtime,
+		DisplayName:            backendDisplayName(descriptor.Runtime),
+		Installed:              descriptor.Probe == nil || descriptor.Probe.Installed,
+		SupportsSession:        descriptor.Capabilities.StartSession && descriptor.Capabilities.StreamEvents,
+		SupportsTextGeneration: descriptor.Capabilities.TextGeneration || anyModelSupportsTask(models, contract.RuntimeModelTaskTextGeneration),
+		SupportsEmbeddings:     descriptor.Capabilities.Embeddings || anyModelSupportsTask(models, contract.RuntimeModelTaskEmbeddings),
+		ModelSource:            modelSource(descriptor),
+		Models:                 models,
+		Providers:              providers,
+		Issues:                 backendIssues(descriptor),
 	}
 	registry.DefaultModel = backendDefaultModel(descriptor.Runtime, models)
 	registry.DefaultProvider = defaultProviderFromModel(models, registry.DefaultModel)
@@ -302,9 +307,11 @@ func groupModelsByProvider(models []contract.RuntimeModel) []contract.RuntimePro
 			return 0
 		})
 		providers = append(providers, contract.RuntimeProviderRegistry{
-			Provider:    provider,
-			DisplayName: providerDisplayName(provider),
-			Models:      models,
+			Provider:               provider,
+			DisplayName:            providerDisplayName(provider),
+			SupportsTextGeneration: anyModelSupportsTask(models, contract.RuntimeModelTaskTextGeneration),
+			SupportsEmbeddings:     anyModelSupportsTask(models, contract.RuntimeModelTaskEmbeddings),
+			Models:                 models,
 		})
 	}
 	slices.SortFunc(providers, func(left, right contract.RuntimeProviderRegistry) int {
@@ -475,7 +482,11 @@ func resolveRegistryModelAlias(backend contract.RuntimeBackendRegistry, modelID 
 }
 
 func runtimeModelCapabilitiesEmpty(value contract.RuntimeModelCapabilities) bool {
-	return len(value.ReasoningEffortLevels) == 0 &&
+	return len(value.Tasks) == 0 &&
+		len(value.InputModalities) == 0 &&
+		len(value.OutputModalities) == 0 &&
+		!value.SupportsToolCalling &&
+		len(value.ReasoningEffortLevels) == 0 &&
 		len(value.ContextWindowOptions) == 0 &&
 		len(value.VariantOptions) == 0 &&
 		len(value.AgentOptions) == 0 &&
@@ -486,4 +497,88 @@ func runtimeModelCapabilitiesEmpty(value contract.RuntimeModelCapabilities) bool
 		!value.SupportsThinkingBudget &&
 		len(value.SupportedThinkingLevels) == 0 &&
 		len(value.SupportedThinkingBudgets) == 0
+}
+
+func withDefaultCapabilities(descriptor contract.RuntimeDescriptor, model contract.RuntimeModel) contract.RuntimeModel {
+	if descriptor.Runtime == "openai-compatible" && !modelSupportsTask(model, contract.RuntimeModelTaskTextGeneration) && !modelSupportsTask(model, contract.RuntimeModelTaskEmbeddings) {
+		model.Capabilities = inferredOpenAICompatibleCapabilities(model.ID)
+		return model
+	}
+	if (descriptor.Capabilities.TextGeneration || isKnownTextGenerationRuntime(descriptor.Runtime)) && len(model.Capabilities.Tasks) == 0 {
+		model.Capabilities = addTextGenerationCapability(model.Capabilities, false)
+	}
+	if descriptor.Capabilities.Embeddings && len(model.Capabilities.Tasks) == 0 {
+		model.Capabilities = addEmbeddingCapability(model.Capabilities)
+	}
+	return model
+}
+
+func isKnownTextGenerationRuntime(runtime string) bool {
+	switch runtime {
+	case "codex", "claude", "gemini", "opencode", "pi":
+		return true
+	default:
+		return false
+	}
+}
+
+func inferredOpenAICompatibleCapabilities(modelID string) contract.RuntimeModelCapabilities {
+	normalized := strings.ToLower(strings.TrimSpace(modelID))
+	if strings.Contains(normalized, "embed") || strings.Contains(normalized, "embedding") {
+		return addEmbeddingCapability(contract.RuntimeModelCapabilities{})
+	}
+	return addTextGenerationCapability(contract.RuntimeModelCapabilities{}, true)
+}
+
+func addTextGenerationCapability(caps contract.RuntimeModelCapabilities, supportsToolCalling bool) contract.RuntimeModelCapabilities {
+	caps.Tasks = appendTask(caps.Tasks, contract.RuntimeModelTaskTextGeneration)
+	caps.InputModalities = appendModality(caps.InputModalities, contract.RuntimeModelModalityText)
+	caps.OutputModalities = appendModality(caps.OutputModalities, contract.RuntimeModelModalityText)
+	if supportsToolCalling {
+		caps.SupportsToolCalling = true
+	}
+	return caps
+}
+
+func addEmbeddingCapability(caps contract.RuntimeModelCapabilities) contract.RuntimeModelCapabilities {
+	caps.Tasks = appendTask(caps.Tasks, contract.RuntimeModelTaskEmbeddings)
+	caps.InputModalities = appendModality(caps.InputModalities, contract.RuntimeModelModalityText)
+	caps.OutputModalities = appendModality(caps.OutputModalities, contract.RuntimeModelModalityEmbedding)
+	return caps
+}
+
+func anyModelSupportsTask(models []contract.RuntimeModel, task contract.RuntimeModelTask) bool {
+	for _, model := range models {
+		if modelSupportsTask(model, task) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelSupportsTask(model contract.RuntimeModel, task contract.RuntimeModelTask) bool {
+	for _, candidate := range model.Capabilities.Tasks {
+		if candidate == task {
+			return true
+		}
+	}
+	return false
+}
+
+func appendTask(values []contract.RuntimeModelTask, value contract.RuntimeModelTask) []contract.RuntimeModelTask {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func appendModality(values []contract.RuntimeModelModality, value contract.RuntimeModelModality) []contract.RuntimeModelModality {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }

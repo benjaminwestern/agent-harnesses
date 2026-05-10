@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 type CommitMessageInput struct {
@@ -59,8 +60,41 @@ type GenerateTextInput struct {
 	ModelSelection TextGenerationModelSelection
 	Prompt         string
 	SystemPrompt   string
+	Messages       []Message
+	Tools          []ToolDefinition
+	ToolChoice     any
 	ResponseFormat string
 	Metadata       map[string]any
+}
+
+type Message struct {
+	Role       string     `json:"role"`
+	Content    any        `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+}
+
+type ToolDefinition struct {
+	Type     string             `json:"type"`
+	Function FunctionDefinition `json:"function"`
+}
+
+type FunctionDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function FunctionCall `json:"function"`
+}
+
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type TokenLogprob struct {
@@ -70,9 +104,10 @@ type TokenLogprob struct {
 }
 
 type GenerateTextOutput struct {
-	Text     string
-	Metadata map[string]any
-	Logprobs []TokenLogprob
+	Text           string
+	Metadata       map[string]any
+	Logprobs       []TokenLogprob
+	ProviderResult ProviderResultMetadata
 }
 
 type TextGenerationProvider interface {
@@ -207,13 +242,28 @@ func (r *TextGenerationRouter) GenerateThreadTitle(ctx context.Context, provider
 }
 
 func (r *TextGenerationRouter) GenerateText(ctx context.Context, providerName string, input GenerateTextInput) (*GenerateTextOutput, error) {
+	started := time.Now()
 	input.ModelSelection.Provider = coalesceProvider(providerName, input.ModelSelection.Provider)
 	input.ModelSelection = r.ResolveSelection(input.ModelSelection)
 	provider, err := r.Route(input.ModelSelection.Provider)
 	if err != nil {
 		return nil, err
 	}
-	return provider.GenerateText(ctx, input)
+	out, err := provider.GenerateText(ctx, input)
+	if err != nil || out == nil {
+		return out, err
+	}
+	if out.ProviderResult.Provider == "" {
+		out.ProviderResult.Provider = input.ModelSelection.Provider
+	}
+	if out.ProviderResult.Model == "" {
+		out.ProviderResult.Model = input.ModelSelection.Model
+	}
+	if out.ProviderResult.LatencyMillis == 0 {
+		out.ProviderResult.LatencyMillis = time.Since(started).Milliseconds()
+	}
+	out.Metadata = mergeProviderMetadata(out.Metadata, out.ProviderResult)
+	return out, nil
 }
 
 func (r *TextGenerationRouter) GenerateCommitMessageForSelection(ctx context.Context, input CommitMessageInput) (*CommitMessageOutput, error) {

@@ -2947,7 +2947,10 @@ func runtimeModelsFromOpenCodeInventory(inventory remoteProviderInventory) []con
 				Label:    openCodeModelLabel(provider, model, modelID),
 				Provider: modelProviderID,
 				Capabilities: contract.RuntimeModelCapabilities{
-					VariantOptions: openCodeVariantOptions(modelProviderID, model.Variants),
+					Tasks:            []contract.RuntimeModelTask{contract.RuntimeModelTaskTextGeneration},
+					InputModalities:  []contract.RuntimeModelModality{contract.RuntimeModelModalityText},
+					OutputModalities: []contract.RuntimeModelModality{contract.RuntimeModelModalityText},
+					VariantOptions:   openCodeVariantOptions(modelProviderID, model.Variants),
 				},
 			})
 		}

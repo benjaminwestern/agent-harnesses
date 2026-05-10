@@ -33,6 +33,9 @@ type ModelOptions struct {
 	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	ThinkingLevel     string         `json:"thinking_level,omitempty"`
 	ThinkingBudget    *int           `json:"thinking_budget,omitempty"`
+	MaxOutputTokens   int            `json:"max_output_tokens,omitempty"`
+	Temperature       *float64       `json:"temperature,omitempty"`
+	TopP              *float64       `json:"top_p,omitempty"`
 	BaseURL           string         `json:"base_url,omitempty"`
 	APIKey            string         `json:"api_key,omitempty"`
 	OAuthTokenURL     string         `json:"oauth_token_url,omitempty"`
