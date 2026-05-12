@@ -37,6 +37,7 @@ type ModelOptions struct {
 	Temperature       *float64       `json:"temperature,omitempty"`
 	TopP              *float64       `json:"top_p,omitempty"`
 	BaseURL           string         `json:"base_url,omitempty"`
+	APIKeyEnv         string         `json:"api_key_env,omitempty"`
 	APIKey            string         `json:"api_key,omitempty"`
 	OAuthTokenURL     string         `json:"oauth_token_url,omitempty"`
 	OAuthClientID     string         `json:"oauth_client_id,omitempty"`

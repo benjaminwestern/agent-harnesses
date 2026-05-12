@@ -63,10 +63,31 @@ type GenerateTextInput struct {
 	Prompt         string
 	SystemPrompt   string
 	Messages       []Message
+	Media          []MediaAttachment
 	Tools          []ToolDefinition
 	ToolChoice     any
 	ResponseFormat string
 	Metadata       map[string]any
+}
+
+type MediaAttachment struct {
+	FileName string `json:"file_name,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+}
+
+type GenerateOptions struct {
+	Provider        string         `json:"provider,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	BaseURL         string         `json:"base_url,omitempty"`
+	APIKeyEnv       string         `json:"api_key_env,omitempty"`
+	APIKey          string         `json:"api_key,omitempty"`
+	SystemPrompt    string         `json:"system_prompt,omitempty"`
+	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
+	Temperature     float64        `json:"temperature,omitempty"`
+	TopP            float64        `json:"top_p,omitempty"`
+	ResponseFormat  string         `json:"response_format,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 type Message struct {
@@ -246,6 +267,7 @@ func (r *TextGenerationRouter) GenerateThreadTitle(ctx context.Context, provider
 
 func (r *TextGenerationRouter) GenerateText(ctx context.Context, providerName string, input GenerateTextInput) (*GenerateTextOutput, error) {
 	started := time.Now()
+	input = GenerateTextInputWithMedia(input)
 	input.ModelSelection.Provider = coalesceProvider(providerName, input.ModelSelection.Provider)
 	input.ModelSelection = r.ResolveSelection(input.ModelSelection)
 	provider, err := r.Route(input.ModelSelection.Provider)
@@ -294,6 +316,16 @@ func (r *TextGenerationRouter) GenerateThreadTitleForSelection(ctx context.Conte
 
 func (r *TextGenerationRouter) GenerateTextForSelection(ctx context.Context, input GenerateTextInput) (*GenerateTextOutput, error) {
 	return r.GenerateText(ctx, "", input)
+}
+
+func (r *TextGenerationRouter) GenerateTextWithOptions(ctx context.Context, opts GenerateOptions, messages []Message) (*GenerateTextOutput, error) {
+	return r.GenerateTextForSelection(ctx, GenerateTextInput{
+		ModelSelection: TextGenerationSelectionFromOptions(opts),
+		SystemPrompt:   opts.SystemPrompt,
+		Messages:       messages,
+		ResponseFormat: opts.ResponseFormat,
+		Metadata:       opts.Metadata,
+	})
 }
 
 func (r *TextGenerationRouter) resolveProviderName(selection TextGenerationModelSelection) string {

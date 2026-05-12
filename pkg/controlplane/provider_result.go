@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -44,6 +45,32 @@ type ProviderResultError struct {
 	Cause   error                  `json:"-"`
 }
 
+// ProviderResultCarrier is implemented by errors that preserve structured
+// provider metadata.
+type ProviderResultCarrier interface {
+	ProviderResult() (ProviderResultMetadata, bool)
+}
+
+type ProviderResultSummary struct {
+	Count         int                      `json:"count"`
+	StatusCodes   map[string]int           `json:"status_codes,omitempty"`
+	OutputKinds   map[string]int           `json:"output_kinds,omitempty"`
+	FinishReasons map[string]int           `json:"finish_reasons,omitempty"`
+	ErrorKinds    map[string]int           `json:"error_kinds,omitempty"`
+	RequestIDs    []string                 `json:"request_ids,omitempty"`
+	Samples       []ProviderResultMetadata `json:"samples,omitempty"`
+}
+
+type ResultAggregator struct {
+	Count         int
+	StatusCodes   map[string]int
+	OutputKinds   map[string]int
+	FinishReasons map[string]int
+	ErrorKinds    map[string]int
+	RequestIDs    []string
+	Samples       []ProviderResultMetadata
+}
+
 func NewProviderResultError(message string, result ProviderResultMetadata, cause error) *ProviderResultError {
 	return &ProviderResultError{
 		Message: strings.TrimSpace(message),
@@ -83,6 +110,82 @@ func (e *ProviderResultError) Unwrap() error {
 		return nil
 	}
 	return e.Cause
+}
+
+func (e *ProviderResultError) ProviderResult() (ProviderResultMetadata, bool) {
+	if e == nil {
+		return ProviderResultMetadata{}, false
+	}
+	return e.Result, true
+}
+
+func (a *ResultAggregator) Add(result ProviderResultMetadata) {
+	if a == nil {
+		return
+	}
+	a.Count++
+	if result.StatusCode != 0 {
+		incrementStringCount(&a.StatusCodes, fmt.Sprintf("%d", result.StatusCode))
+	}
+	if result.OutputKind != "" {
+		incrementStringCount(&a.OutputKinds, result.OutputKind)
+	}
+	if result.FinishReason != "" {
+		incrementStringCount(&a.FinishReasons, result.FinishReason)
+	}
+	if result.Error != nil && result.Error.Kind != "" {
+		incrementStringCount(&a.ErrorKinds, result.Error.Kind)
+	}
+	if result.RequestID != "" {
+		a.RequestIDs = appendUniqueString(a.RequestIDs, result.RequestID)
+	}
+	a.Samples = append(a.Samples, result)
+}
+
+func (a *ResultAggregator) AddError(err error) bool {
+	if a == nil || err == nil {
+		return false
+	}
+	var carrier ProviderResultCarrier
+	if !errors.As(err, &carrier) {
+		return false
+	}
+	result, ok := carrier.ProviderResult()
+	if !ok {
+		return false
+	}
+	a.Add(result)
+	return true
+}
+
+func (a *ResultAggregator) Merge(other ResultAggregator) {
+	if a == nil {
+		return
+	}
+	a.Count += other.Count
+	mergeStringCounts(&a.StatusCodes, other.StatusCodes)
+	mergeStringCounts(&a.OutputKinds, other.OutputKinds)
+	mergeStringCounts(&a.FinishReasons, other.FinishReasons)
+	mergeStringCounts(&a.ErrorKinds, other.ErrorKinds)
+	for _, requestID := range other.RequestIDs {
+		a.RequestIDs = appendUniqueString(a.RequestIDs, requestID)
+	}
+	a.Samples = append(a.Samples, other.Samples...)
+}
+
+func (a *ResultAggregator) Summary() ProviderResultSummary {
+	if a == nil {
+		return ProviderResultSummary{}
+	}
+	return ProviderResultSummary{
+		Count:         a.Count,
+		StatusCodes:   copyStringCounts(a.StatusCodes),
+		OutputKinds:   copyStringCounts(a.OutputKinds),
+		FinishReasons: copyStringCounts(a.FinishReasons),
+		ErrorKinds:    copyStringCounts(a.ErrorKinds),
+		RequestIDs:    append([]string(nil), a.RequestIDs...),
+		Samples:       append([]ProviderResultMetadata(nil), a.Samples...),
+	}
 }
 
 func mergeProviderMetadata(metadata map[string]any, result ProviderResultMetadata) map[string]any {
@@ -134,4 +237,51 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func incrementStringCount(target *map[string]int, key string) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	if *target == nil {
+		*target = map[string]int{}
+	}
+	(*target)[key]++
+}
+
+func mergeStringCounts(target *map[string]int, source map[string]int) {
+	for key, count := range source {
+		if count == 0 {
+			continue
+		}
+		if *target == nil {
+			*target = map[string]int{}
+		}
+		(*target)[key] += count
+	}
+}
+
+func copyStringCounts(source map[string]int) map[string]int {
+	if source == nil {
+		return nil
+	}
+	out := make(map[string]int, len(source))
+	for key, count := range source {
+		out[key] = count
+	}
+	return out
+}
+
+func appendUniqueString(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }

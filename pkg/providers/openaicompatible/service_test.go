@@ -80,6 +80,43 @@ func TestServiceGenerateTextPassesControlsAndTools(t *testing.T) {
 	}
 }
 
+func TestServiceGenerateTextWithOptions(t *testing.T) {
+	var got struct {
+		Model     string        `json:"model"`
+		MaxTokens int           `json:"max_tokens"`
+		Messages  []api.Message `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "gpt-fixture",
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "done"},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	out, err := NewService(EndpointConfig{Provider: "openai", BaseURL: server.URL}).GenerateTextWithOptions(context.Background(), api.GenerateOptions{
+		Provider:        "openai",
+		Model:           "gpt-fixture",
+		MaxOutputTokens: 64,
+		ResponseFormat:  "text",
+	}, []api.Message{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("GenerateTextWithOptions: %v", err)
+	}
+	if out.Text != "done" || got.Model != "gpt-fixture" || got.MaxTokens != 64 {
+		t.Fatalf("output/request = %+v %+v", out, got)
+	}
+	if len(got.Messages) != 1 || got.Messages[0].Content != "hello" {
+		t.Fatalf("messages = %+v", got.Messages)
+	}
+}
+
 func TestServiceGenerateTextMapsControlPlaneContentParts(t *testing.T) {
 	var got struct {
 		Messages []openaicompat.ChatMessage `json:"messages"`
@@ -134,6 +171,61 @@ func TestServiceGenerateTextMapsControlPlaneContentParts(t *testing.T) {
 	}
 	if parts[2].Type != "image_url" || parts[2].ImageURL == nil || parts[2].ImageURL.URL != "data:image/png;base64,aW1hZ2U=" {
 		t.Fatalf("image part = %#v, want data image_url", parts[2])
+	}
+}
+
+func TestServiceGenerateTextMapsMediaAttachments(t *testing.T) {
+	var got struct {
+		Messages []openaicompat.ChatMessage `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "gpt-fixture",
+			"choices": []map[string]any{{
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "described"},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	_, err := NewService(EndpointConfig{Provider: "openai", BaseURL: server.URL}).GenerateText(context.Background(), api.GenerateTextInput{
+		ModelSelection: api.TextGenerationModelSelection{Provider: "openai", Model: "gpt-fixture"},
+		SystemPrompt:   "be concise",
+		Prompt:         "caption",
+		Media: []api.MediaAttachment{
+			{FileName: "image.png", MimeType: "image/png", Data: []byte("image")},
+			{FileName: "notes.txt", MimeType: "text/plain", Data: []byte("skip")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("GenerateText: %v", err)
+	}
+	if len(got.Messages) != 2 {
+		t.Fatalf("message count = %d, want system + user", len(got.Messages))
+	}
+	if got.Messages[0].Role != "system" || got.Messages[0].Content != "be concise" {
+		t.Fatalf("system message = %+v", got.Messages[0])
+	}
+	encoded, err := json.Marshal(got.Messages[1].Content)
+	if err != nil {
+		t.Fatalf("marshal content: %v", err)
+	}
+	var parts []openaicompat.ChatContentPart
+	if err := json.Unmarshal(encoded, &parts); err != nil {
+		t.Fatalf("decode content parts: %v", err)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("part count = %d, want text + image: %#v", len(parts), parts)
+	}
+	if parts[0].Type != "text" || parts[0].Text != "caption" {
+		t.Fatalf("text part = %#v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "data:image/png;base64,aW1hZ2U=" {
+		t.Fatalf("image part = %#v", parts[1])
 	}
 }
 

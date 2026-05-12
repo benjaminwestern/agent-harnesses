@@ -87,8 +87,9 @@ func ResolveTextGenerationSelection(input EndpointResolutionInput) api.TextGener
 		Provider: endpoint.Provider,
 		Model:    strings.TrimSpace(input.Model),
 		Options: api.ModelOptions{
-			BaseURL: endpoint.BaseURL,
-			APIKey:  endpoint.APIKey,
+			BaseURL:   endpoint.BaseURL,
+			APIKeyEnv: endpoint.APIKeyEnv,
+			APIKey:    endpoint.APIKey,
 		},
 	}
 }
@@ -100,8 +101,9 @@ func ResolveEmbeddingSelection(input EndpointResolutionInput, dimensions int) ap
 		Model:      strings.TrimSpace(input.Model),
 		Dimensions: dimensions,
 		Options: api.ModelOptions{
-			BaseURL: endpoint.BaseURL,
-			APIKey:  endpoint.APIKey,
+			BaseURL:   endpoint.BaseURL,
+			APIKeyEnv: endpoint.APIKeyEnv,
+			APIKey:    endpoint.APIKey,
 		},
 	}
 }

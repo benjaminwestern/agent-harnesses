@@ -160,6 +160,11 @@ func mergeOptionsWithMap(opts ModelOptions, defaults map[string]any) ModelOption
 			opts.APIKey = v
 		}
 	}
+	if opts.APIKeyEnv == "" {
+		if v, ok := defaults["api_key_env"].(string); ok {
+			opts.APIKeyEnv = v
+		}
+	}
 	if opts.OAuthTokenURL == "" {
 		if v, ok := defaults["oauth_token_url"].(string); ok {
 			opts.OAuthTokenURL = v

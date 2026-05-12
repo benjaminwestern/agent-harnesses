@@ -29,6 +29,7 @@ func (s *Service) Endpoint() EndpointConfig {
 
 func (s *Service) GenerateText(ctx context.Context, input api.GenerateTextInput) (*api.GenerateTextOutput, error) {
 	started := time.Now()
+	input = api.GenerateTextInputWithMedia(input)
 	endpoint := s.endpointConfig()
 	model := strings.TrimSpace(input.ModelSelection.Model)
 	if model == "" {
@@ -81,6 +82,16 @@ func (s *Service) GenerateText(ctx context.Context, input api.GenerateTextInput)
 		Logprobs:       controlplaneLogprobs(choice.Logprobs),
 		ProviderResult: result,
 	}, nil
+}
+
+func (s *Service) GenerateTextWithOptions(ctx context.Context, opts api.GenerateOptions, messages []api.Message) (*api.GenerateTextOutput, error) {
+	return s.GenerateText(ctx, api.GenerateTextInput{
+		ModelSelection: api.TextGenerationSelectionFromOptions(opts),
+		SystemPrompt:   opts.SystemPrompt,
+		Messages:       messages,
+		ResponseFormat: opts.ResponseFormat,
+		Metadata:       opts.Metadata,
+	})
 }
 
 func (s *Service) GenerateEmbeddings(ctx context.Context, input api.EmbeddingInput) (*api.EmbeddingOutput, error) {

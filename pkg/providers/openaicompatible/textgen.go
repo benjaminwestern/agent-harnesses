@@ -170,7 +170,7 @@ func (p *Provider) GenerateText(ctx context.Context, input api.GenerateTextInput
 }
 
 func openAIClientForOptions(options api.ModelOptions) *openaicompat.Client {
-	client := openaicompat.NewClient(options.BaseURL, "")
+	client := openaicompat.NewClient(options.BaseURL, options.APIKeyEnv)
 	client.SetAPIKey(options.APIKey)
 	if options.OAuthTokenURL != "" {
 		client.SetOAuthCredentials(options.OAuthTokenURL, options.OAuthClientID, options.OAuthClientSecret)
@@ -202,10 +202,11 @@ func applyChatModelOptions(req *openaicompat.ChatCompletionRequest, options api.
 
 func endpointConfigFromSelection(selection api.TextGenerationModelSelection) EndpointConfig {
 	endpoint := ResolveEndpointConfig(EndpointResolutionInput{
-		Provider: selection.Provider,
-		Model:    selection.Model,
-		BaseURL:  selection.Options.BaseURL,
-		APIKey:   selection.Options.APIKey,
+		Provider:  selection.Provider,
+		Model:     selection.Model,
+		BaseURL:   selection.Options.BaseURL,
+		APIKeyEnv: selection.Options.APIKeyEnv,
+		APIKey:    selection.Options.APIKey,
 	})
 	endpoint.OAuthTokenURL = selection.Options.OAuthTokenURL
 	endpoint.OAuthClientID = selection.Options.OAuthClientID

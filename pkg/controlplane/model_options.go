@@ -13,6 +13,7 @@ func HasModelOptions(options ModelOptions) bool {
 		options.Temperature != nil ||
 		options.TopP != nil ||
 		strings.TrimSpace(options.BaseURL) != "" ||
+		strings.TrimSpace(options.APIKeyEnv) != "" ||
 		strings.TrimSpace(options.APIKey) != "" ||
 		strings.TrimSpace(options.OAuthTokenURL) != "" ||
 		strings.TrimSpace(options.OAuthClientID) != "" ||
@@ -46,6 +47,9 @@ func MergeModelOptions(values ...ModelOptions) ModelOptions {
 		}
 		if strings.TrimSpace(value.BaseURL) != "" {
 			out.BaseURL = strings.TrimSpace(value.BaseURL)
+		}
+		if strings.TrimSpace(value.APIKeyEnv) != "" {
+			out.APIKeyEnv = strings.TrimSpace(value.APIKeyEnv)
 		}
 		if strings.TrimSpace(value.APIKey) != "" {
 			out.APIKey = strings.TrimSpace(value.APIKey)

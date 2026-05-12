@@ -46,11 +46,28 @@ func (o *OneShot) GenerateText(ctx context.Context, input GenerateTextInput) (*G
 	return o.textGen.GenerateTextForSelection(ctx, input)
 }
 
+func (o *OneShot) GenerateTextWithOptions(ctx context.Context, opts GenerateOptions, messages []Message) (*GenerateTextOutput, error) {
+	if o == nil || o.textGen == nil {
+		return nil, contextError("one-shot text generation router is nil")
+	}
+	return o.textGen.GenerateTextWithOptions(ctx, opts, messages)
+}
+
 func (o *OneShot) GenerateEmbeddings(ctx context.Context, input EmbeddingInput) (*EmbeddingOutput, error) {
 	if o == nil || o.embeddings == nil {
 		return nil, contextError("one-shot embedding router is nil")
 	}
 	return o.embeddings.GenerateEmbeddingsForSelection(ctx, input)
+}
+
+func (o *OneShot) Capabilities(query CapabilityQuery) TaskCapability {
+	if o == nil {
+		return ProviderCapabilities(query.Provider, query.Model)
+	}
+	return mergeTaskCapabilities(
+		o.textGen.Capabilities(query),
+		o.embeddings.Capabilities(query),
+	)
 }
 
 func (o *OneShot) Describe() contract.SystemDescriptor {
